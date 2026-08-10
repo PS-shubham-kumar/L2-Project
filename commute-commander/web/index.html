@@ -8,6 +8,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
 </head>
 <body>
 <main class="app-shell" role="main">
@@ -401,6 +404,27 @@
           <div id="news-feed-panel" class="news-feed-panel">
             <p class="empty-state">Headlines will appear after your first briefing.</p>
           </div>
+
+          <!-- Live commute map — Leaflet renders here -->
+          <section class="map-section" aria-label="Live commute map">
+            <div class="map-header">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+                <circle cx="12" cy="10" r="3"/>
+                <path d="M12 2a8 8 0 00-8 8c0 5.25 8 14 8 14s8-8.75 8-14a8 8 0 00-8-8z"/>
+              </svg>
+              <b>Live commute</b>
+              <span id="map-source-badge" class="map-source-badge hidden"></span>
+            </div>
+            <!-- Leaflet map container — height set in CSS -->
+            <div id="commute-map" class="commute-map"
+                 role="application" aria-label="Commute route map">
+            </div>
+            <!-- Shown before any briefing has run -->
+            <p class="map-empty-state" id="map-empty-state">
+              Run a briefing to see your route here.
+            </p>
+          </section>
         </aside>
 
       </div><!-- /ask-layout -->
@@ -469,6 +493,8 @@
 <!-- Toast -->
 <div id="toast" class="toast hidden" role="alert" aria-live="assertive"></div>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV/XN/WLEo=" crossorigin=""></script>
 <script src="app.js"></script>
 </body>
 </html>

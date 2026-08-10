@@ -132,7 +132,7 @@ class OrchestratorAgent:
 
         if "commute" in routed_agents:
             try:
-                results["commute"] = self.commute_agent.run_structured(location)
+                results["commute"] = self.commute_agent.run_structured(location, "")
             except Exception as exc:
                 results["commute"] = {
                     "section": "commute",
@@ -178,10 +178,11 @@ class OrchestratorAgent:
         ingredients = intent.get("ingredients", [])
         time_constraint = intent.get("time_constraint", "10 min")
 
+        destination = intent.get("destination", "")
         dispatch = {
-            "weather": lambda: self.weather_agent.run_structured(location),
-            "news": lambda: self.news_agent.run_structured(),
-            "commute": lambda: self.commute_agent.run_structured(location),
+            "weather":   lambda: self.weather_agent.run_structured(location),
+            "news":      lambda: self.news_agent.run_structured(),
+            "commute":   lambda: self.commute_agent.run_structured(location, destination),
             "breakfast": lambda: self.breakfast_agent.run_structured(ingredients, time_constraint),
         }
 

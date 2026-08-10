@@ -548,3 +548,65 @@ body {
   .hour-labels span:nth-child(even) { display: none; }
   .metric strong { font-size: 17px; }
 }
+
+/* ── Leaflet commute map ────────────────────────────────────────────────── */
+.map-section {
+  margin-top: 14px;
+  flex-shrink: 0;
+}
+
+.map-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.map-header b {
+  flex: 1;
+  color: var(--ink);
+  font-size: 10.5px;
+}
+
+.map-source-badge {
+  font-size: 8px;
+  font-weight: 700;
+  background: #e8f5ec;
+  color: var(--green);
+  border: 1px solid #b8e6c6;
+  border-radius: 6px;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+.map-source-badge.source-advisory {
+  background: #fff8e6;
+  color: #8a6200;
+  border-color: #f5d88a;
+}
+
+/* Leaflet container */
+.commute-map {
+  height: 160px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  /* Leaflet needs a non-zero height to init correctly */
+  z-index: 0;       /* keep below modals (z-index:100) */
+}
+
+/* Fix Leaflet tile layers inside our overflow:hidden shell */
+.commute-map .leaflet-container {
+  border-radius: 10px;
+}
+
+.map-empty-state {
+  font-size: 9.5px;
+  color: var(--muted);
+  text-align: center;
+  padding: 8px 0 2px;
+  line-height: 1.5;
+}

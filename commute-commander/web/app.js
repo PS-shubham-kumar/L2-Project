@@ -177,14 +177,22 @@ function renderWeather(payload) {
 function renderCommute(payload) {
   const d = payload.data; if (!d) return;
   clearSkeleton(commuteSubtitle); clearSkeleton(commuteEtaBadge);
-  const mode = d.recommended_mode || 'drive';
-  const modeLabel = mode.charAt(0).toUpperCase() + mode.slice(1);
-  const eta = d.eta_minutes || '--';
-  commuteSubtitle.textContent = d.alerts?.length ? d.alerts[0] : `${modeLabel} recommended`;
+  const mode      = d.recommended_mode || 'drive';
+  const modeLabel = d.mode_label || (mode.charAt(0).toUpperCase() + mode.slice(1));
+  const eta       = d.eta_minutes || '--';
+  const dist      = d.distance_km ? ` · ${d.distance_km} km` : '';
+
+  commuteSubtitle.textContent = d.alerts?.length
+    ? d.alerts[0]
+    : `${modeLabel} recommended${dist}`;
   commuteEtaBadge.textContent = `${eta} min`;
+
   clearSkeleton(metricEta); clearSkeleton(metricEtaSub);
-  metricEta.textContent = `${eta} min`;
+  metricEta.textContent    = `${eta} min`;
   metricEtaSub.textContent = modeLabel;
+
+  // Render Leaflet map with real polyline + markers
+  renderCommuteMap(d);
 }
 
 function renderBreakfast(payload) {
@@ -209,23 +217,27 @@ function renderNews(payload) {
   newsMiniSub.textContent = headlines[0]?.title || 'No headlines';
   newsMiniFoot.textContent = `${headlines.length} loaded`;
 
-  // Update news progress bar to 100% once loaded
   const np = $('news-progress');
   if (np) { np.style.width = '100%'; np.setAttribute('aria-valuenow', 100); }
   $('news-pct').textContent = 'Live';
 
-  // Render news panel feed
   newsFeedPanel.innerHTML = '';
   headlines.forEach((item, i) => {
     const row = document.createElement('div');
     row.className = 'news-row';
-    row.setAttribute('role', 'article');
+    row.setAttribute('role', item.url ? 'link' : 'article');
+    if (item.url) {
+      row.style.cursor = 'pointer';
+      row.title = 'Open article';
+      row.addEventListener('click', () => window.open(item.url, '_blank', 'noopener,noreferrer'));
+    }
     row.innerHTML = `
-      <span class="news-num">${i+1}</span>
+      <span class="news-num">${i + 1}</span>
       <div class="news-content">
         <b>${escHtml(item.title)}</b>
         <span>${escHtml(item.source)} · ${formatTime(item.timestamp)}</span>
-      </div>`;
+      </div>
+      ${item.url ? '<span style="color:var(--muted);font-size:12px;flex-shrink:0;padding-left:4px">↗</span>' : ''}`;
     newsFeedPanel.appendChild(row);
   });
 }
@@ -261,6 +273,143 @@ function dispatchSection(section, payload) {
     case 'commute':   renderCommute(payload);   break;
     case 'breakfast': renderBreakfast(payload); break;
     case 'news':      renderNews(payload);      break;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   LEAFLET MAP
+   Manages a single Leaflet map instance in #commute-map.
+   renderCommuteMap(data) is called by renderCommute() whenever
+   fresh commute data arrives.
+   ════════════════════════════════════════════════════════════ */
+const mapEl         = $('commute-map');
+const mapEmptyState = $('map-empty-state');
+const mapBadge      = $('map-source-badge');
+
+let _leafletMap     = null;   // L.Map instance (created once)
+let _routeLayer     = null;   // L.LayerGroup for route + markers
+let _altLayers      = [];     // alternate route polylines
+
+/* Tile layer — OpenStreetMap (no API key required) */
+const _TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+const _TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
+function _ensureMap(lat, lon) {
+  if (_leafletMap) return;
+  // Hide the empty-state placeholder
+  mapEmptyState.classList.add('hidden');
+  mapEl.classList.remove('hidden');
+
+  _leafletMap = L.map('commute-map', {
+    zoomControl:       true,
+    attributionControl: true,
+    scrollWheelZoom:   false,   // don't hijack page scroll
+  });
+
+  L.tileLayer(_TILE_URL, {
+    attribution: _TILE_ATTR,
+    maxZoom: 18,
+  }).addTo(_leafletMap);
+
+  _leafletMap.setView([lat, lon], 12);
+}
+
+function _makePinIcon(color) {
+  /* Tiny SVG circle marker — avoids the default Leaflet image dependency */
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">
+    <circle cx="11" cy="11" r="9" fill="${color}" stroke="white" stroke-width="2"/>
+  </svg>`;
+  return L.divIcon({
+    html:        svg,
+    className:   '',
+    iconSize:    [22, 22],
+    iconAnchor:  [11, 11],
+    popupAnchor: [0, -14],
+  });
+}
+
+const _ORIGIN_ICON = _makePinIcon('#7260c3');   // purple
+const _DEST_ICON   = _makePinIcon('#f06a9a');   // pink
+
+function renderCommuteMap(data) {
+  if (!data) return;
+
+  const origin   = data.origin || {};
+  const dest     = data.dest   || {};
+  const polyline = data.polyline || [];
+  const source   = data.source   || 'advisory';
+
+  const hasCoords = (
+    typeof origin.lat === 'number' && typeof origin.lon === 'number' &&
+    typeof dest.lat   === 'number' && typeof dest.lon   === 'number'
+  );
+
+  if (!hasCoords) return;
+
+  // Initialise map centred on origin
+  _ensureMap(origin.lat, origin.lon);
+
+  // Clear previous route layer
+  if (_routeLayer) {
+    _routeLayer.clearLayers();
+  } else {
+    _routeLayer = L.layerGroup().addTo(_leafletMap);
+  }
+  _altLayers.forEach(l => _leafletMap.removeLayer(l));
+  _altLayers = [];
+
+  // ── Main route polyline ────────────────────────────────────
+  if (polyline.length >= 2) {
+    const routeLine = L.polyline(polyline, {
+      color:     '#7260c3',
+      weight:    4,
+      opacity:   0.85,
+      lineJoin:  'round',
+    }).addTo(_routeLayer);
+
+    // Fit map to the route bounds with a little padding
+    _leafletMap.fitBounds(routeLine.getBounds(), { padding: [20, 20] });
+  } else {
+    // No polyline — just set view between the two points
+    const mid = [
+      (origin.lat + dest.lat) / 2,
+      (origin.lon + dest.lon) / 2,
+    ];
+    _leafletMap.setView(mid, 12);
+  }
+
+  // ── Alternate route polylines (dimmed) ─────────────────────
+  (data.alternates || []).forEach(alt => {
+    if (!alt.polyline || alt.polyline.length < 2) return;
+    const altLine = L.polyline(alt.polyline, {
+      color:    '#b4a9dd',
+      weight:   2.5,
+      opacity:  0.55,
+      dashArray: '6 6',
+    });
+    altLine.bindTooltip(
+      `${alt.mode.charAt(0).toUpperCase() + alt.mode.slice(1)}: ${alt.eta_minutes} min`,
+      { sticky: true }
+    );
+    altLine.addTo(_leafletMap);
+    _altLayers.push(altLine);
+  });
+
+  // ── Origin marker ──────────────────────────────────────────
+  L.marker([origin.lat, origin.lon], { icon: _ORIGIN_ICON })
+    .bindPopup(`<b>Start</b><br>${origin.label || ''}`)
+    .addTo(_routeLayer);
+
+  // ── Destination marker ─────────────────────────────────────
+  L.marker([dest.lat, dest.lon], { icon: _DEST_ICON })
+    .bindPopup(`<b>Destination</b><br>${dest.label || ''}`)
+    .addTo(_routeLayer);
+
+  // ── Source badge ───────────────────────────────────────────
+  if (mapBadge) {
+    mapBadge.textContent  = source === 'tomtom' ? 'Live · TomTom' : 'Advisory';
+    mapBadge.className    = `map-source-badge${source !== 'tomtom' ? ' source-advisory' : ''}`;
+    mapBadge.classList.remove('hidden');
   }
 }
 
@@ -397,13 +546,28 @@ function buildWeatherDetail(d) {
 }
 
 function buildCommuteDetail(d) {
-  const mode = d.recommended_mode || 'drive';
-  const alerts = (d.alerts||[]).map(a=>`<div class="alert-banner"><span>⚠</span><span>${escHtml(a)}</span></div>`).join('');
-  const alts = (d.alternates||[]).map(a=>`<div class="alt-item"><b>${escHtml(a.mode)}</b><span>${escHtml(String(a.eta_minutes))} min</span></div>`).join('');
-  return `<h3>Recommended</h3>
-    <p>${escHtml(mode.charAt(0).toUpperCase()+mode.slice(1))} · <strong>${escHtml(String(d.eta_minutes))} min</strong></p>
+  const mode     = d.recommended_mode || 'drive';
+  const label    = d.mode_label || (mode.charAt(0).toUpperCase() + mode.slice(1));
+  const dist     = d.distance_km ? `${d.distance_km} km` : '';
+  const src      = d.source === 'tomtom' ? '🟢 Live data via TomTom' : '🟡 Advisory estimate';
+  const alerts   = (d.alerts || []).map(a =>
+    `<div class="alert-banner"><span>⚠</span><span>${escHtml(a)}</span></div>`).join('');
+  const alts     = (d.alternates || []).map(a =>
+    `<div class="alt-item">
+       <b>${escHtml(a.mode.charAt(0).toUpperCase() + a.mode.slice(1))}</b>
+       <span>${escHtml(String(a.eta_minutes))} min${a.distance_km ? ' · ' + a.distance_km + ' km' : ''}</span>
+     </div>`).join('');
+  const origin   = d.origin?.label ? `<p>From: <strong>${escHtml(d.origin.label)}</strong></p>` : '';
+  const destTxt  = d.dest?.label   ? `<p>To: <strong>${escHtml(d.dest.label)}</strong></p>`     : '';
+
+  return `
+    <h3>Recommended Route</h3>
+    ${origin}${destTxt}
+    <p>${escHtml(label)} · <strong>${escHtml(String(d.eta_minutes))} min</strong>${dist ? ' · ' + escHtml(dist) : ''}</p>
+    <p style="font-size:10px;color:var(--muted)">${src}</p>
     ${alerts}
-    <h3>Alternatives</h3><div class="alt-list">${alts||'<p>No alternates.</p>'}</div>`;
+    <h3>Alternatives</h3>
+    <div class="alt-list">${alts || '<p>No alternates.</p>'}</div>`;
 }
 
 function buildBreakfastDetail(d) {
@@ -418,12 +582,23 @@ function buildBreakfastDetail(d) {
 }
 
 function buildNewsDetail(d) {
-  const rows = (d.headlines||[]).map(h => {
-    const link = h.url ? `<a href="${escHtml(h.url)}" target="_blank" rel="noopener noreferrer">↗</a>` : '';
-    return `<div class="alt-item" style="align-items:flex-start">
-      <div style="flex:1;min-width:0"><b>${escHtml(h.title)}</b><br><span>${escHtml(h.source)} · ${formatTime(h.timestamp)}</span></div>${link}</div>`;
+  const rows = (d.headlines || []).map(h => {
+    const titleHtml = h.url
+      ? `<a href="${escHtml(h.url)}" target="_blank" rel="noopener noreferrer"
+            style="color:var(--ink);text-decoration:none;font-weight:600">${escHtml(h.title)}</a>`
+      : `<b>${escHtml(h.title)}</b>`;
+    const extLink = h.url
+      ? `<a href="${escHtml(h.url)}" target="_blank" rel="noopener noreferrer"
+            aria-label="Open article" style="color:var(--muted);font-size:13px;flex-shrink:0">↗</a>`
+      : '';
+    return `<div class="alt-item" style="align-items:flex-start;gap:10px">
+      <div style="flex:1;min-width:0">
+        ${titleHtml}<br>
+        <span style="font-size:9.5px;color:var(--muted)">${escHtml(h.source)} · ${formatTime(h.timestamp)}</span>
+      </div>${extLink}
+    </div>`;
   }).join('');
-  return `<h3>Top Headlines</h3><div class="alt-list">${rows||'<p>No headlines.</p>'}</div>`;
+  return `<h3>Top Headlines</h3><div class="alt-list">${rows || '<p>No headlines.</p>'}</div>`;
 }
 
 /* ── Breakfast swap ── */
@@ -477,7 +652,24 @@ const rerunBtn = $('rerun-btn');
 const saveBtn  = $('save-btn');
 const editBtn  = $('edit-btn');
 
-rerunBtn?.addEventListener('click', () => { if (queryInput.value.trim()) form.requestSubmit(); });
+rerunBtn?.addEventListener('click', async () => {
+  if (!state.sessionId) { if (queryInput.value.trim()) form.requestSubmit(); return; }
+  rerunBtn.disabled = true;
+  try {
+    const res  = await fetch(`/api/briefing/${state.sessionId}/rerun`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || 'Re-run failed');
+    const sections = data.sections || {};
+    ['weather', 'commute', 'breakfast', 'news'].forEach(sec => {
+      if (sections[sec]) dispatchSection(sec, sections[sec]);
+    });
+    showToast('Briefing refreshed', 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    rerunBtn.disabled = false;
+  }
+});
 editBtn?.addEventListener('click', () => { queryInput.focus(); queryInput.select(); });
 saveBtn?.addEventListener('click', async () => {
   if (!state.sessionId) return;

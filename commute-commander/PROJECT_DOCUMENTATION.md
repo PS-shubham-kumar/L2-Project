@@ -1,7 +1,7 @@
 # Commute Commander — Project Documentation
 
 > Last updated: 2026-08-09
-> Status: Web UI complete · Backend structured API complete · CLI preserved
+> Status: Phase 3 complete · Phase 4 complete · CLI preserved
 
 ---
 
@@ -9,148 +9,164 @@
 
 Commute Commander is a Python application that blends natural-language understanding, specialist agents, MCP-style tool registration, and session persistence to generate a personalized morning briefing covering weather, commute, news, and breakfast.
 
-The project started as a CLI tool and has been fully extended with a responsive web dashboard. It is structured to support continued growth into voice interfaces, mobile apps, and real MCP SDK integration.
+It runs as both a CLI tool and a full responsive web dashboard. The web UI is served by a pure-Python HTTP server with no framework dependencies.
 
 ---
 
 ## 2. Completion Status
 
-### ✅ Done — Phase 1: CLI Core
-
-| Item | Status |
-|---|---|
-| Natural-language query parser (`nlp/query_parser.py`) | ✅ Complete |
-| OrchestratorAgent with `run()` | ✅ Complete |
-| WeatherAgent — plain text output | ✅ Complete |
-| NewsAgent — plain text output | ✅ Complete |
-| BreakfastAgent — plain text output | ✅ Complete |
-| CommuteAgent — plain text output | ✅ Complete |
-| MCP-style tool layer (ToolRegistry, ServerRegistry, RealMCPServer) | ✅ Complete |
-| JSON session persistence via SessionManager | ✅ Complete |
-| CLI entry point (`main.py`) | ✅ Complete |
-| Demo runner (`run_demo.py`) | ✅ Complete |
-| Basic web server (`webapp.py`) with `POST /api/briefing` | ✅ Complete |
-| Minimal web UI (`web/`) — single textarea, plain-text output | ✅ Complete |
-
----
-
-### ✅ Done — Phase 2: Structured API + Rich Web UI (completed 2026-08-09)
-
-#### Backend
+### ✅ Phase 1 — CLI Core
 
 | Item | File | Status |
 |---|---|---|
-| `WeatherAgent.run_structured()` — typed dict with temp, condition, high/low, uv_index, uv_label, hourly[] | `agents/weather_agent.py` | ✅ |
-| `NewsAgent.run_structured()` — dict with headlines[{title, source, url, timestamp}] | `agents/news_agent.py` | ✅ |
-| `CommuteAgent.run_structured()` — dict with recommended_mode, eta_minutes, alerts[], alternates[] | `agents/commute_agent.py` | ✅ |
-| `BreakfastAgent.run_structured()` — dict with recipe_name, prep_time_minutes, ingredients_used, steps[], alternates[] | `agents/breakfast_agent.py` | ✅ |
-| `OrchestratorAgent.run_structured()` — full structured envelope: {session_id, intent, sections{}} | `agents/orchestrator.py` | ✅ |
-| `OrchestratorAgent.run_section()` — re-invoke one agent by section name using cached intent | `agents/orchestrator.py` | ✅ |
-| `POST /api/briefing` returns structured JSON (session_id, intent, sections) alongside legacy briefing text | `webapp.py` | ✅ |
-| `POST /api/briefing/{id}/{section}/refresh` — single-agent re-run | `webapp.py` | ✅ |
-| `GET /api/briefing/{id}/{section}` — poll a single section | `webapp.py` | ✅ |
-| `GET /api/history` — list past sessions from the sessions/ directory | `webapp.py` | ✅ |
-| In-memory `_session_intents` cache per session for refresh calls | `webapp.py` | ✅ |
-
-#### Frontend
-
-| Item | File | Status |
-|---|---|---|
-| Full HTML rebuild matching design reference | `web/index.html` | ✅ |
-| Purple SVG icon sidebar (7 nav items, active state, sign-out) | `web/index.html` | ✅ |
-| Topbar (eyebrow + h1, search input, avatar) | `web/index.html` | ✅ |
-| Hero card — period chips, SVG sparkline (cubic-bezier temp line + UV band), callout bubble, 3-metric footer | `web/index.html` | ✅ |
-| Commute Now action card (purple, icon, ETA badge, refresh + expand buttons) | `web/index.html` | ✅ |
-| Breakfast Idea action card (pink, icon, prep-time badge, swap + expand buttons) | `web/index.html` | ✅ |
-| Weather & UV mini-card (floating icon, UV gradient progress bar) | `web/index.html` | ✅ |
-| Headlines mini-card (floating icon, progress bar) | `web/index.html` | ✅ |
-| Breakfast Prep Timer mini-card (countdown progress bar, Start/Pause button) | `web/index.html` | ✅ |
-| Right panel — Ask Commander tab, History tab | `web/index.html` | ✅ |
-| Query form (textarea, user-id input, submit button) | `web/index.html` | ✅ |
-| Intent confirmation chips (location + section chips, appear after parse) | `web/index.html` | ✅ |
-| Example prompt chips (4 clickable pre-filled queries) | `web/index.html` | ✅ |
-| Dashboard controls (Re-run all, Save briefing, Edit query) | `web/index.html` | ✅ |
-| Live commute map (decorative SVG with road grid, route lines, start/end pins) | `web/index.html` | ✅ |
-| Detail modal (close via button, backdrop, Escape key) | `web/index.html` | ✅ |
-| Toast notification | `web/index.html` | ✅ |
-| Full CSS token system (--lavender, --purple, --pink, --green, --ink, --muted, --line) | `web/styles.css` | ✅ |
-| Card hierarchy radii (shell 32px → cards 24px → chips 12px) | `web/styles.css` | ✅ |
-| Skeleton shimmer loading state | `web/styles.css` | ✅ |
-| Responsive layout — 850px breakpoint (right panel drops below, sidebar goes horizontal) | `web/styles.css` | ✅ |
-| Responsive layout — 560px breakpoint (sidebar hidden, single column) | `web/styles.css` | ✅ |
-| SVG sparkline renderer (cubic-bezier temp line + UV band area fill) | `web/app.js` | ✅ |
-| Per-card renderers: renderWeather, renderCommute, renderBreakfast, renderNews | `web/app.js` | ✅ |
-| dispatchSection router — routes payload to correct renderer | `web/app.js` | ✅ |
-| Form submit handler with per-card skeleton loading | `web/app.js` | ✅ |
-| data-refresh event delegation — single-card refresh | `web/app.js` | ✅ |
-| data-expand event delegation — modal with detail HTML builders | `web/app.js` | ✅ |
-| Breakfast swap button → refreshSection('breakfast') | `web/app.js` | ✅ |
-| Breakfast prep timer (interval-based, Start/Pause/Done) | `web/app.js` | ✅ |
-| Tab switching (Ask Commander / History) | `web/app.js` | ✅ |
-| History loader (GET /api/history) | `web/app.js` | ✅ |
-| Dashboard controls wired (Re-run, Save, Edit) | `web/app.js` | ✅ |
+| Natural-language query parser | `nlp/query_parser.py` | ✅ |
+| OrchestratorAgent `run()` | `agents/orchestrator.py` | ✅ |
+| WeatherAgent plain-text output | `agents/weather_agent.py` | ✅ |
+| NewsAgent plain-text output | `agents/news_agent.py` | ✅ |
+| BreakfastAgent plain-text output | `agents/breakfast_agent.py` | ✅ |
+| CommuteAgent plain-text output | `agents/commute_agent.py` | ✅ |
+| MCP-style tool layer | `mcp_tools/` | ✅ |
+| JSON session persistence | `services/session_manager.py` | ✅ |
+| CLI entry point | `main.py` | ✅ |
+| Demo runner | `run_demo.py` | ✅ |
 
 ---
 
-## 3. Current Project Structure
+### ✅ Phase 2 — Structured API + Rich Web UI
+
+| Item | File | Status |
+|---|---|---|
+| `WeatherAgent.run_structured()` | `agents/weather_agent.py` | ✅ |
+| `NewsAgent.run_structured()` | `agents/news_agent.py` | ✅ |
+| `CommuteAgent.run_structured()` | `agents/commute_agent.py` | ✅ |
+| `BreakfastAgent.run_structured()` | `agents/breakfast_agent.py` | ✅ |
+| `OrchestratorAgent.run_structured()` | `agents/orchestrator.py` | ✅ |
+| `OrchestratorAgent.run_section()` | `agents/orchestrator.py` | ✅ |
+| `POST /api/briefing` structured JSON response | `webapp.py` | ✅ |
+| `POST /api/briefing/{id}/{section}/refresh` | `webapp.py` | ✅ |
+| Full web dashboard HTML | `web/index.html` | ✅ |
+| Token-based CSS (lavender/purple/pink theme) | `web/styles.css` | ✅ |
+| Card renderers + sparkline + timer | `web/app.js` | ✅ |
+| Responsive layout (850px / 560px) | `web/styles.css` | ✅ |
+
+---
+
+### ✅ Phase 3 — API Completeness (completed 2026-08-09)
+
+| Item | File | What changed |
+|---|---|---|
+| `SessionManager.save_intent()` / `get_intent()` | `services/session_manager.py` | Writes/reads `intent` key in session JSON — survives server restarts |
+| `SessionManager.save_briefing()` / `is_saved()` | `services/session_manager.py` | Marks session as saved, persists full section payloads to `last_sections` |
+| `SessionManager.get_session()` / `list_sessions()` | `services/session_manager.py` | Full session read; list returns summaries (session_id, query, location, sections, saved) |
+| `POST /api/briefing/{id}/save` | `webapp.py` | Re-runs sections, calls `save_briefing()`, returns `{saved: true}` |
+| `POST /api/briefing/{id}/rerun` | `webapp.py` | Re-runs all agents from stored intent, returns full sections envelope |
+| `PATCH /api/briefing/{id}/intent` | `webapp.py` | Merges any subset of intent fields, persists to disk |
+| `GET /api/history` fix | `webapp.py` | Was broken (`data[0]` on a dict); now uses `session_manager.list_sessions()` |
+| `GET /api/history/{session_id}` | `webapp.py` | Returns full session JSON for detail view |
+| Intent persistence across restarts | `webapp.py` + `session_manager.py` | `_session_intents` in-memory dict removed; all lookups go through `session_manager.get_intent()` |
+| Removed redundant `orchestrator.run()` call | `webapp.py` | `_handle_briefing` now calls `run_structured()` once only |
+| Real Open-Meteo hourly weather | `mcp_tools/weather_tools.py` | `_geocode()` → `_fetch_open_meteo()` → `_build_hourly()` (07:00–20:00 slots) |
+| Weather high/low from real hourly | `agents/weather_agent.py` | Derived from `max()/min()` of hourly temps; synthetic fallback only when hourly is empty |
+| News URLs in RSS path | `mcp_tools/news_tools.py` | `_parse_rss()` extracts `<link>` text (RSS) / `href` attr (Atom); 3 feed fallbacks |
+| News tool returns structured dicts | `mcp_tools/news_tools.py` | Returns `[{title, source, url, published_at}]` instead of plain strings |
+| NewsAgent handles new dict format | `agents/news_agent.py` | `run_structured()` passes real URLs through; `run()` still outputs plain text |
+| Re-run button wired to `/rerun` | `web/app.js` | Was re-submitting the form; now calls `POST /api/briefing/{id}/rerun` |
+
+---
+
+### ✅ Phase 4 — Real Commute Routing + Leaflet Map (completed 2026-08-09)
+
+| Item | File | What changed |
+|---|---|---|
+| TomTom Search geocoding | `mcp_tools/commute_tools.py` | `_geocode_tomtom()` resolves city name → lat/lon/label; falls back to Open-Meteo geocoding |
+| TomTom Routing API | `mcp_tools/commute_tools.py` | `_call_tomtom_route()` calls `/routing/1/calculateRoute/`, decodes `points[]` to `[[lat,lon]]` polyline, extracts `eta_minutes`, `distance_km`, `traffic_delay_s` |
+| Drive + bike + walk routing | `mcp_tools/commute_tools.py` | Calls TomTom for `car`, `bicycle`, `pedestrian` modes; synthetic transit = drive ETA + 12 min |
+| Traffic delay alerts | `mcp_tools/commute_tools.py` | Alert generated when `trafficDelayInSeconds > 300` |
+| Advisory fallback | `mcp_tools/commute_tools.py` | Full structured fallback dict with empty polylines when no key or API error |
+| `get_commute_advice()` shim | `mcp_tools/commute_tools.py` | Preserved for CLI `run()` compatibility |
+| `CommuteTool.get_commute_route()` | `mcp_tools/commute_tools.py` | New primary method; `get_commute_advice()` delegates to it |
+| `CommuteAgent.run_structured()` | `agents/commute_agent.py` | Calls `get_commute_route()`, surfaces `polyline`, `origin`, `dest`, `distance_km`, `source` |
+| Orchestrator passes `destination` | `agents/orchestrator.py` | Both `run_structured()` and `run_section()` pass `destination=""` to commute agent |
+| Leaflet 1.9.4 CDN (SRI) | `web/index.html` | CSS in `<head>`, JS before `app.js`; SRI hashes for both |
+| Real Leaflet map div | `web/index.html` | Replaced decorative SVG with `#commute-map` + source badge + empty-state paragraph |
+| Map CSS | `web/styles.css` | `.commute-map` 160px height, `z-index:0`; `.map-source-badge` green/amber variants |
+| Leaflet map module | `web/app.js` | `_ensureMap()`, `_makePinIcon()` SVG divIcon, `renderCommuteMap()` — main route (purple), alternates (dashed), origin/dest markers with popups, `fitBounds()` |
+| Source badge | `web/app.js` | Shows "Live · TomTom" (green) or "Advisory" (amber) |
+| Commute modal enriched | `web/app.js` | Shows origin/dest labels, distance, data source |
+| News rows clickable | `web/app.js` | Clicking a headline row opens `item.url` in a new tab when URL is present |
+| News modal links | `web/app.js` | Headline titles are `<a>` tags when URL available |
+
+---
+
+## 3. Current API Endpoints
+
+| Method | Path | Purpose | Status |
+|---|---|---|---|
+| `GET` | `/` | Serves `web/index.html` | ✅ |
+| `POST` | `/api/briefing` | Full briefing — `{session_id, intent, sections{}}` | ✅ |
+| `POST` | `/api/briefing/{id}/{section}/refresh` | Re-run one agent | ✅ |
+| `GET` | `/api/briefing/{id}/{section}` | Poll one section | ✅ |
+| `POST` | `/api/briefing/{id}/save` | Pin briefing to disk | ✅ |
+| `POST` | `/api/briefing/{id}/rerun` | Re-run all agents from stored intent | ✅ |
+| `PATCH` | `/api/briefing/{id}/intent` | Merge intent fields, persist | ✅ |
+| `GET` | `/api/history` | List 20 most-recent sessions | ✅ |
+| `GET` | `/api/history/{id}` | Full session detail | ✅ |
+
+---
+
+## 4. Current Project Structure
 
 ```text
 commute-commander/
-├── main.py                              # CLI entry point
-├── webapp.py                            # HTTP server — static files + JSON API
-├── run_demo.py                          # demo runner
+├── main.py                        # CLI entry point
+├── webapp.py                      # HTTP server — static files + full JSON API
+├── run_demo.py
 ├── README.md
-├── PROJECT_DOCUMENTATION.md            # ← this file
+├── PROJECT_DOCUMENTATION.md       # ← this file
 ├── requirements.txt
-├── __init__.py
 │
 ├── agents/
-│   ├── orchestrator.py                  # run() [CLI] + run_structured() + run_section() [API]
-│   ├── weather_agent.py                 # run() + run_structured()
-│   ├── news_agent.py                    # run() + run_structured()
-│   ├── commute_agent.py                 # run() + run_structured()
-│   ├── breakfast_agent.py               # run() + run_structured()
-│   ├── router.py                        # intent-to-agent routing
-│   ├── agent_registry.py
-│   ├── mcp_agent.py
-│   └── tool_discovery_agent.py
+│   ├── orchestrator.py            # run() · run_structured() · run_section()
+│   ├── weather_agent.py           # run() · run_structured() — real hourly data
+│   ├── news_agent.py              # run() · run_structured() — real URLs
+│   ├── commute_agent.py           # run() · run_structured(location, destination)
+│   ├── breakfast_agent.py         # run() · run_structured()
+│   ├── router.py
+│   └── agent_registry.py
 │
 ├── mcp_tools/
-│   ├── weather_tools.py                 # OpenWeather + Open-Meteo fallback
-│   ├── news_tools.py                    # NewsAPI + RSS fallback
-│   ├── recipe_tools.py                  # MealDB API
-│   ├── commute_tools.py                 # TomTom / OpenRouteService / advice fallback
+│   ├── weather_tools.py           # Open-Meteo geocoding + current + hourly
+│   ├── news_tools.py              # NewsAPI + 3 RSS feeds, structured dicts with URLs
+│   ├── commute_tools.py           # TomTom Search + Routing, advisory fallback
+│   ├── recipe_tools.py            # MealDB API
 │   ├── real_mcp_server.py
 │   ├── server_registry.py
 │   ├── tool_registry.py
 │   ├── tool_schema.py
-│   ├── framework_mcp.py
-│   └── mcp_server.py
+│   └── framework_mcp.py
 │
 ├── nlp/
-│   └── query_parser.py                  # keyword + zero-shot intent parser
+│   └── query_parser.py
 │
 ├── services/
-│   ├── config.py                        # API key management
-│   ├── session_manager.py               # JSON session persistence
+│   ├── session_manager.py         # save_intent · get_intent · save_briefing
+│   │                              # get_session · list_sessions
+│   ├── config.py                  # OPENWEATHER / NEWSAPI / TOMTOM / ORS keys
 │   ├── mealdb.py
 │   ├── news_feed.py
 │   └── open_meteo.py
 │
-├── sessions/                            # persisted session JSON files
+├── sessions/                      # {session_id, intent, last_sections, interactions[]}
 │
-├── web/                                 # browser UI (served by webapp.py)
-│   ├── index.html                       # full dashboard — rebuilt 2026-08-09
-│   ├── styles.css                       # token-based CSS — rebuilt 2026-08-09
-│   └── app.js                           # card renderers + API client — rebuilt 2026-08-09
+├── web/
+│   ├── index.html                 # Leaflet CDN · 3-view layout (Ask/History/Settings)
+│   ├── styles.css                 # Token CSS · Leaflet map styles
+│   └── app.js                     # Leaflet map module · card renderers · /rerun wired
 │
 ├── docs/
 │   ├── ui-spec.md
 │   ├── api-contract.md
-│   └── design-preferance/               # visual design reference images
-│
-├── examples/
-│   └── agentic_flow.py
+│   └── design-preferance/
 │
 └── tests/
     ├── test_query_parser.py
@@ -159,213 +175,149 @@ commute-commander/
 
 ---
 
-## 4. System Flow
-
-### Web UI flow (current)
+## 5. Data Flow (current)
 
 ```
-User types query in browser
+User query (browser)
    ↓
-POST /api/briefing  {query, user_id}
+POST /api/briefing
    ↓
-webapp.py → OrchestratorAgent.run_structured()
-   ↓
-QueryParser.parse() → {location, sections, ingredients, time_constraint}
+OrchestratorAgent.run_structured(query, session_id)
+   ↓  ┌─────────────────────────────────────────────────────┐
+   ↓  │ QueryParser → {location, sections, ingredients, ...} │
+   ↓  └─────────────────────────────────────────────────────┘
    ↓
 Router.route(sections)
    ↓
-[WeatherAgent | NewsAgent | BreakfastAgent | CommuteAgent].run_structured()
+┌──────────────────────────────────────────────────────────┐
+│ WeatherAgent.run_structured(location)                     │
+│   → WeatherTool → _geocode() → Open-Meteo current+hourly │
+│                                                          │
+│ NewsAgent.run_structured()                               │
+│   → NewsTool → NewsAPI | RSS (with URLs)                 │
+│                                                          │
+│ CommuteAgent.run_structured(location, destination)       │
+│   → CommuteTool → _geocode() → TomTom Routing API       │
+│                   → polyline + ETA + alternates          │
+│                                                          │
+│ BreakfastAgent.run_structured(ingredients, time)         │
+│   → RecipeTool → MealDB API                              │
+└──────────────────────────────────────────────────────────┘
    ↓
-Each agent calls its MCP tool (weather_tools / news_tools / recipe_tools / commute_tools)
+{session_id, intent, sections{weather,news,commute,breakfast}}
    ↓
-Typed section dicts collected into envelope {session_id, intent, sections{}}
+session_manager.save_intent(session_id, intent)   ← disk
    ↓
 JSON response → browser
    ↓
-dispatchSection() routes each section to its card renderer
-   ↓
-Hero card, action cards, mini-cards update independently
-   ↓
-SessionManager logs interaction to sessions/*.json
-```
-
-### Single-card refresh flow
-
-```
-User clicks Refresh on a card
-   ↓
-POST /api/briefing/{session_id}/{section}/refresh
-   ↓
-webapp.py → OrchestratorAgent.run_section(section, cached_intent)
-   ↓
-One agent re-runs → typed section dict
-   ↓
-dispatchSection() updates only that card
-```
-
-### CLI flow (preserved)
-
-```
-python main.py → OrchestratorAgent.run(query) → combined plain-text briefing → terminal
+dispatchSection() → card renderers
+   ↓ (commute)
+renderCommuteMap() → Leaflet polyline + markers → #commute-map
 ```
 
 ---
 
-## 5. API Endpoints (current)
+## 6. Session File Format (current)
 
-| Method | Path | Purpose |
+```json
+{
+  "session_id":    "guest-20260809180809",
+  "user_id":       "guest",
+  "created_at":    "2026-08-09T18:08:09.297101",
+  "saved":         false,
+  "intent":        { "location": "Chicago, IL", "sections": ["weather","commute"], ... },
+  "last_sections": null,
+  "interactions":  [
+    { "query": "...", "structured": true, "sections_returned": [...], "timestamp": "..." }
+  ]
+}
+```
+
+---
+
+## 7. Environment Variables
+
+| Key | Used by | Required |
 |---|---|---|
-| `GET` | `/` | Serves `web/index.html` |
-| `POST` | `/api/briefing` | Full briefing — returns `{session_id, intent, sections{}, briefing}` |
-| `POST` | `/api/briefing/{id}/{section}/refresh` | Re-run one agent, return one section dict |
-| `GET` | `/api/briefing/{id}/{section}` | Poll one section using cached intent |
-| `GET` | `/api/history` | List past sessions from `sessions/` directory |
+| `OPENWEATHER_API_KEY` | `weather_tools.py` — current conditions | Optional (falls back to Open-Meteo) |
+| `NEWSAPI_API_KEY` | `news_tools.py` — top headlines with URLs | Optional (falls back to RSS) |
+| `TOMTOM_API_KEY` | `commute_tools.py` — routing + geocoding | Optional (falls back to advisory) |
+| `OPENROUTESERVICE_API_KEY` | `commute_tools.py` — future alternative | Not yet used |
 
 ---
 
-## 6. What Is Left — Gaps & Known Limitations
+## 8. What Is Left — Remaining Gaps
 
-### Functional gaps
-
-| Gap | Detail |
-|---|---|
-| Real commute routing | `commute_tools.py` returns advice text only; no actual map routing. TomTom / ORS keys needed to get real ETA + turn-by-turn. |
-| Weather hourly data is synthetic | `weather_agent.run_structured()` generates synthetic hourly values by offsetting the current temp. Real hourly data needs the Open-Meteo hourly endpoint. |
-| News without source URLs | `news_tools.py` parses from RSS; no article URLs in the RSS fallback path. NewsAPI returns real URLs when key is configured. |
-| Session intents are in-memory | `_session_intents` in `webapp.py` is lost on server restart. Needs file or DB persistence. |
-| No real SSE / streaming | Cards load all-at-once from one request, not progressively per agent. The API contract describes SSE but it is not implemented. |
-| `/api/briefing/{id}/save` not implemented | The Save button calls this endpoint but `webapp.py` returns a 404. |
-| `/api/briefing/{id}/rerun` not implemented | Re-run all currently re-submits the form from JS; a proper endpoint is missing. |
-| `PATCH /api/briefing/{id}/intent` not implemented | Intent editing chips in the UI have no backend write path. |
-
-### UI gaps
+### Functional
 
 | Gap | Detail |
 |---|---|
-| Live map is decorative only | The commute map SVG is a static illustration; no real map library (Leaflet, Mapbox) integrated. |
-| Weather sparkline uses synthetic hourly data | Will auto-correct once the weather agent returns real hourly data. |
-| No dark mode | Token system is ready for it but no `@media (prefers-color-scheme: dark)` rules exist yet. |
-| No audio briefing | The play button in the sidebar is wired for nav state only; no TTS integration. |
+| Transit routing | TomTom free tier excludes public transit; transit ETA is drive+12 min synthetic |
+| Weather condition label | Derived from temperature range only; no precipitation or cloud-cover data |
+| Breakfast `steps[]` | MealDB sometimes omits steps; fallback generates generic steps |
+| `GET /api/briefing/{id}/stream` (SSE) | Cards still load all-at-once; no per-agent streaming |
+
+### UI
+
+| Gap | Detail |
+|---|---|
+| Map on mobile | Leaflet container is 160px and works but is not resizable / full-screen |
+| Dark mode | CSS token system is ready; no `prefers-color-scheme` media query yet |
+| Settings persistence | Settings form saves a toast but no `GET /api/settings` + `PUT /api/settings` backend |
 
 ---
 
-## 7. Future Roadmap
-
-### Phase 3 — API completeness (next priority)
-
-- [ ] Implement `POST /api/briefing/{id}/save` — write briefing to `sessions/` with structured data
-- [ ] Implement `POST /api/briefing/{id}/rerun` — re-run orchestrator with cached intent, return fresh envelope
-- [ ] Implement `PATCH /api/briefing/{id}/intent` — update and re-run on intent edits
-- [ ] Persist `_session_intents` to disk alongside session JSON so they survive restarts
-- [ ] Replace synthetic hourly weather with real Open-Meteo hourly endpoint call
-- [ ] Pass real article URLs from NewsAPI through to the news section data
-
-### Phase 4 — Real commute routing
-
-- [ ] Integrate TomTom or OpenRouteService for actual route geometry and ETA
-- [ ] Return real `alternates[]` with mode, ETA, and polyline for map rendering
-- [ ] Replace decorative map SVG with Leaflet.js and real route overlay
+## 9. Future Roadmap
 
 ### Phase 5 — Progressive loading / SSE
 
-- [ ] Add `GET /api/briefing/{id}/stream` SSE endpoint — emit one event per section as agents complete
-- [ ] Update `app.js` to listen on the event stream and render cards as events arrive
-- [ ] This eliminates the wait for the slowest agent before anything appears
+- [ ] `GET /api/briefing/{id}/stream` — Server-Sent Events endpoint emitting one JSON event per section as each agent completes
+- [ ] `app.js` EventSource listener — render cards as events arrive instead of waiting for all agents
+- [ ] Eliminates wait on slowest agent (currently commute TomTom call can be 1–2 s)
 
 ### Phase 6 — Persistent storage
 
-- [ ] Replace JSON file sessions with SQLite (or PostgreSQL for production)
+- [ ] Replace JSON file sessions with SQLite (`services/db.py`)
 - [ ] Store intent, section results, and timestamps relationally
-- [ ] Enable history search, filtering, and re-open of past briefings
+- [ ] Enable history search and re-open of past briefings with full section data
 
 ### Phase 7 — User accounts and preferences
 
-- [ ] Add user registration + login (JWT or session cookie)
-- [ ] Store default location, units (metric/imperial), default sections, news categories per user
-- [ ] `GET /api/settings` and `PUT /api/settings` endpoints from the API contract
-- [ ] Pre-fill query with saved preferences on page load
+- [ ] `GET /api/settings` and `PUT /api/settings` endpoints
+- [ ] Store default location, units, default sections, news categories per user
+- [ ] Pre-fill query textarea with saved preferences on page load
+- [ ] Simple session-cookie authentication (no OAuth needed for v1)
 
 ### Phase 8 — Real MCP SDK migration
 
-- [ ] Replace the custom MCP simulation layer with the official MCP Python SDK
+- [ ] Replace custom `MCPToolRegistry` / `RealMCPServer` with the official MCP Python SDK
 - [ ] Register each tool server as a proper MCP-compliant server
-- [ ] Enable tool discovery by an external orchestrator agent
+- [ ] Enable external orchestrator discovery of tools
 
 ### Phase 9 — Voice interface
 
-- [ ] Add speech-to-text input (Web Speech API in browser, or Whisper API)
-- [ ] Add text-to-speech briefing playback (Web Speech API or ElevenLabs)
-- [ ] Wire the audio play button in the sidebar to trigger TTS of the current briefing
+- [ ] Web Speech API speech-to-text input in browser
+- [ ] Text-to-speech briefing playback (Web Speech API or ElevenLabs)
+- [ ] Wire the audio play button in the sidebar
 
 ### Phase 10 — Mobile / PWA
 
-- [ ] Add `manifest.json` and service worker for installable PWA
+- [ ] `manifest.json` + service worker for installable PWA
 - [ ] Offline fallback page
 - [ ] Push notifications for morning briefing reminders
 
 ---
 
-## 8. How to Run
+## 10. How to Run
 
-### Web dashboard
 ```bash
+# Web dashboard
 python webapp.py
 # Open http://localhost:8000
-```
 
-### CLI
-```bash
+# CLI
 python main.py
-```
 
-### Tests
-```bash
+# Tests
 python -m pytest tests/
 ```
-
----
-
-## 9. Environment Variables (`.env`)
-
-| Key | Purpose | Required |
-|---|---|---|
-| `OPENWEATHER_API_KEY` | Real-time weather data | Optional (falls back to Open-Meteo) |
-| `NEWSAPI_API_KEY` | Top headlines with URLs | Optional (falls back to RSS) |
-| `TOMTOM_API_KEY` | Real commute routing | Optional (falls back to advice text) |
-| `OPENROUTESERVICE_API_KEY` | Alternative routing | Optional |
-
----
-
-## 10. Architecture Patterns
-
-### Multi-agent orchestration
-Each specialist agent owns its domain. The orchestrator coordinates without knowing agent internals. Adding a new domain (e.g., calendar, health) means adding one agent + one tool module — nothing else changes.
-
-### Dual-mode agents
-Every agent exposes both `run()` (plain text for CLI) and `run_structured()` (typed dict for the web API). This keeps the CLI fully functional while the web UI gets structured data it can render into cards.
-
-### MCP-style tool layer
-Tool registration, server grouping, and tool invocation are abstracted through `ToolRegistry` / `ServerRegistry` / `RealMCPServer`. Ready for migration to the official MCP Python SDK when needed.
-
-### Session-first persistence
-Every interaction is logged to `sessions/*.json` with a session ID and timestamp. This is compatible with future migration to a database without redesigning the orchestration layer.
-
-### Token-based CSS
-All colors, radii, and shadows are defined as CSS custom properties. Extending to dark mode, theming, or a design token export (Style Dictionary) requires only changes to `:root`.
-
----
-
-## 11. Design Reference
-
-The web UI was built to match the fitness dashboard design reference (stored in `docs/design-preferance/`) adapted to the commute/weather/news/breakfast content domain:
-
-| Reference element | Commute Commander equivalent |
-|---|---|
-| Lavender-blue canvas | Page background |
-| White rounded shell with border | `app-shell` — 32px radius, ambient shadow |
-| Narrow purple icon sidebar | Navigation rail — 7 SVG icons |
-| Large purple "Overview" card with sparkline | Hero card — temp/UV sparkline, 3 metrics |
-| Purple accent card (top right) | Commute Now — ETA badge, mode, alerts |
-| Pink accent card (top right) | Breakfast Idea — recipe name, prep time |
-| Three white mini-cards with floating icons | Weather & UV, Headlines, Prep Timer |
-| Right panel with list and map | Briefing panel — form, history, route map |
