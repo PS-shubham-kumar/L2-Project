@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import requests
 
-from mcp_tools.framework_mcp import MCPToolRegistry
+from fastmcp import FastMCP
 from services.config import Config
 
-registry = MCPToolRegistry()
+mcp = FastMCP("weather-server")
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
@@ -77,7 +77,7 @@ def _build_hourly(meteo_data: dict) -> list[dict]:
 
 # ── registered tool ────────────────────────────────────────────────────────
 
-@registry.tool(name="get_weather", description="Fetch weather and UV information for a location")
+@mcp.tool(name="get_weather", description="Fetch weather and UV information for a location")
 def get_weather(location: str) -> dict:
     # ── path 1: OpenWeatherMap for current conditions ──────────────────────
     api_key = Config.OPENWEATHER_API_KEY
@@ -133,4 +133,8 @@ def get_weather(location: str) -> dict:
 
 class WeatherTool:
     def get_weather(self, location: str) -> dict:
-        return registry.call("get_weather", location)
+        return get_weather(location)
+
+
+if __name__ == "__main__":
+    mcp.run()

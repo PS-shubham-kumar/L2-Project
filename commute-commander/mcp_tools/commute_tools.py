@@ -1,4 +1,4 @@
-"""Commute tool — real routing via TomTom Routing API.
+"""Commute tool — real routing via TomTom Routing API with India support.
 
 get_route(location, destination, mode) -> dict:
     {
@@ -24,23 +24,17 @@ from __future__ import annotations
 
 import requests
 
-from mcp_tools.framework_mcp import MCPToolRegistry
+from fastmcp import FastMCP
 from services.config import Config
 
-registry = MCPToolRegistry()
+mcp = FastMCP("commute-server")
 
 # TomTom travelMode values that map to our UI modes
 _TT_MODES = {
     "drive":   "car",
-    "transit": "bus",
+    "transit": "car",   # TomTom free tier has no transit; use car as proxy
     "bike":    "bicycle",
     "walk":    "pedestrian",
-}
-
-_FALLBACK_ADVICE = {
-    "drive":   ("drive",   28, 18.0),
-    "transit": ("transit", 42, 16.0),
-    "bike":    ("bike",    55, 12.0),
 }
 
 
@@ -67,6 +61,36 @@ def _geocode_tomtom(query: str, api_key: str) -> tuple[float, float, str] | None
     return None
 
 
+def _geocode_nominatim(query: str) -> tuple[float, float, str] | None:
+    """OpenStreetMap Nominatim geocoding — free, no key, great India coverage."""
+    try:
+        r = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={
+                "q": query,
+                "format": "json",
+                "limit": 1,
+                "addressdetails": 1,
+            },
+            headers={"User-Agent": "CommuteCommander/1.0"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        results = r.json()
+        if results:
+            res = results[0]
+            lat = float(res["lat"])
+            lon = float(res["lon"])
+            label = res.get("display_name", query)
+            # Shorten the display_name to city + country
+            parts = label.split(",")
+            short = ", ".join(p.strip() for p in parts[:3])
+            return lat, lon, short
+    except Exception:
+        pass
+    return None
+
+
 def _geocode_open_meteo(query: str) -> tuple[float, float, str] | None:
     """No-key geocoding fallback using Open-Meteo geocoding API."""
     try:
@@ -87,11 +111,15 @@ def _geocode_open_meteo(query: str) -> tuple[float, float, str] | None:
 
 
 def _geocode(query: str, api_key: str) -> tuple[float, float, str] | None:
-    """Try TomTom geocoding first, fall back to Open-Meteo."""
+    """Try TomTom → Nominatim → Open-Meteo geocoding cascade."""
     if api_key:
         result = _geocode_tomtom(query, api_key)
         if result:
             return result
+    # Try Nominatim (great for Indian cities)
+    result = _geocode_nominatim(query)
+    if result:
+        return result
     return _geocode_open_meteo(query)
 
 
@@ -149,16 +177,54 @@ def _call_tomtom_route(
         return None
 
 
+# ── ORS (OpenRouteService) fallback for non-car modes ─────────────────────
+
+def _call_ors_route(
+    origin_lat: float, origin_lon: float,
+    dest_lat: float, dest_lon: float,
+    profile: str,  # "driving-car", "cycling-regular", "foot-walking"
+) -> dict | None:
+    """Free OpenRouteService routing — no key needed for basic use."""
+    try:
+        r = requests.get(
+            f"https://api.openrouteservice.org/v2/directions/{profile}",
+            params={
+                "api_key": "5b3ce3597851110001cf62488082efec9de747d3a8ebe748f3d5a069",  # public demo key
+                "start": f"{origin_lon},{origin_lat}",
+                "end": f"{dest_lon},{dest_lat}",
+            },
+            timeout=12,
+        )
+        if not r.ok:
+            return None
+        data = r.json()
+        features = data.get("features", [])
+        if not features:
+            return None
+        props = features[0].get("properties", {})
+        summary = props.get("summary", {})
+        coords = features[0].get("geometry", {}).get("coordinates", [])
+        polyline = [[c[1], c[0]] for c in coords]  # ORS returns [lon,lat]
+        return {
+            "eta_minutes": round(summary.get("duration", 0) / 60),
+            "distance_km": round(summary.get("distance", 0) / 1000, 1),
+            "polyline": polyline,
+            "traffic_delay_s": 0,
+        }
+    except Exception:
+        return None
+
+
 # ── Registered tool ────────────────────────────────────────────────────────
 
-@registry.tool(
+@mcp.tool(
     name="get_commute_route",
     description="Get real commute routing data between two locations",
 )
 def get_commute_route(location: str, destination: str = "") -> dict:
     """Return routing data for all supported modes.
 
-    `location`    — origin (e.g. "Chicago, IL")
+    `location`    — origin (e.g. "Mumbai, India" or "Chicago, IL")
     `destination` — explicit destination; defaults to city centre of location
     """
     api_key = Config.TOMTOM_API_KEY
@@ -166,20 +232,21 @@ def get_commute_route(location: str, destination: str = "") -> dict:
     # Geocode origin
     origin = _geocode(location, api_key) if location else None
     if not origin:
-        origin = (41.8781, -87.6298, "Chicago, IL")   # default fallback
+        # Generic centre-of-India fallback if geocoding fails
+        origin = (20.5937, 78.9629, "India")
     orig_lat, orig_lon, orig_label = origin
 
-    # Destination: use provided string or pick a recognisable downtown point
-    dest_query = destination if destination else f"downtown {location or 'Chicago'}"
+    # Destination: use provided string or pick a recognisable nearby point
+    dest_query = destination if destination else f"{location} city centre"
     dest = _geocode(dest_query, api_key)
     if not dest:
-        # Offset 10 km north as a last resort so the route is non-trivial
-        dest = (orig_lat + 0.09, orig_lon + 0.04, f"Downtown {location}")
+        # Offset ~8 km northeast as a last resort so the route is non-trivial
+        dest = (orig_lat + 0.07, orig_lon + 0.06, f"Downtown {location}")
     dest_lat, dest_lon, dest_label = dest
 
     # ── TomTom routing ─────────────────────────────────────────────────────
     if api_key:
-        drive_data = _call_tomtom_route(orig_lat, orig_lon, dest_lat, dest_lon, "car",  api_key)
+        drive_data = _call_tomtom_route(orig_lat, orig_lon, dest_lat, dest_lon, "car", api_key)
         bike_data  = _call_tomtom_route(orig_lat, orig_lon, dest_lat, dest_lon, "bicycle",    api_key)
         walk_data  = _call_tomtom_route(orig_lat, orig_lon, dest_lat, dest_lon, "pedestrian", api_key)
 
@@ -224,16 +291,16 @@ def get_commute_route(location: str, destination: str = "") -> dict:
             }
 
     # ── Advisory fallback (no key or routing failed) ───────────────────────
-    eta  = 28
-    dist = 18.0
+    eta  = 35
+    dist = 15.0
     return {
         "recommended_mode": "drive",
         "eta_minutes":      eta,
         "distance_km":      dist,
         "alerts":           [f"Leave 15–20 min early for {location} traffic."],
         "alternates": [
-            {"mode": "transit", "eta_minutes": eta + 12, "distance_km": dist, "polyline": []},
-            {"mode": "bike",    "eta_minutes": eta + 27, "distance_km": dist, "polyline": []},
+            {"mode": "transit", "eta_minutes": eta + 15, "distance_km": dist, "polyline": []},
+            {"mode": "bike",    "eta_minutes": eta + 30, "distance_km": dist, "polyline": []},
         ],
         "polyline": [],
         "origin":   {"lat": orig_lat, "lon": orig_lon, "label": orig_label},
@@ -243,7 +310,7 @@ def get_commute_route(location: str, destination: str = "") -> dict:
 
 
 # Keep backward-compat name for any existing callers (CLI run())
-@registry.tool(
+@mcp.tool(
     name="get_commute_advice",
     description="Plain-text commute advice (legacy CLI path)",
 )
@@ -258,8 +325,12 @@ def get_commute_advice(location: str) -> str:
 
 class CommuteTool:
     def get_commute_route(self, location: str, destination: str = "") -> dict:
-        return registry.call("get_commute_route", location, destination)
+        return get_commute_route(location, destination)
 
     # legacy shim
     def get_commute_advice(self, location: str) -> str:
-        return registry.call("get_commute_advice", location)
+        return get_commute_advice(location)
+
+
+if __name__ == "__main__":
+    mcp.run()

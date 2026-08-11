@@ -14,10 +14,10 @@ def _parse_minutes(time_val) -> int:
 
 def _make_steps(recipe_name: str, ingredients: list) -> list[str]:
     """Generate plausible steps when the API doesn't return them."""
-    ing_list = ", ".join(ingredients) if ingredients else "your ingredients"
+    ing_list = ", ".join(str(i) for i in ingredients) if ingredients else "your ingredients"
     return [
         f"Gather your ingredients: {ing_list}.",
-        f"Prep and measure everything before you start.",
+        "Prep and measure everything before you start.",
         f"Cook the {recipe_name} over medium heat, stirring occasionally.",
         "Plate and serve immediately.",
     ]
@@ -40,8 +40,13 @@ class BreakfastAgent:
 
         steps: list = recipe.get("steps") or _make_steps(name, used)
 
+        # Metadata extras from MealDB
+        category: str = recipe.get("category", "")
+        area: str = recipe.get("area", "")
+        thumbnail: str = recipe.get("thumbnail", "")
+
         # Fetch one alternate suggestion with a different primary ingredient
-        alt_ingredients = ["oats"] if "egg" in " ".join(used).lower() else ["eggs"]
+        alt_ingredients = ["oats"] if "egg" in " ".join(str(i) for i in used).lower() else ["eggs"]
         try:
             alt = self.tool.get_recipe(alt_ingredients, time_constraint)
             alternates = [
@@ -62,5 +67,8 @@ class BreakfastAgent:
                 "ingredients_used": used,
                 "steps": steps,
                 "alternates": alternates,
+                "category": category,
+                "area": area,
+                "thumbnail": thumbnail,
             },
         }

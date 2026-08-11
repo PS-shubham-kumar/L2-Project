@@ -1,0 +1,14 @@
+{
+  "session_id": "test",
+  "interactions": [
+    {
+      "query": "weather and commute in Chicago",
+      "structured": true,
+      "sections_returned": [
+        "weather",
+        "commute"
+      ],
+      "timestamp": "2026-08-10T19:11:00.624918"
+    }
+  ]
+}

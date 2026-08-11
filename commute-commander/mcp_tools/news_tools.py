@@ -13,10 +13,10 @@ import requests
 from datetime import datetime, timezone
 from xml.etree import ElementTree as ET
 
-from mcp_tools.framework_mcp import MCPToolRegistry
+from fastmcp import FastMCP
 from services.config import Config
 
-registry = MCPToolRegistry()
+mcp = FastMCP("news-server")
 
 # RSS feeds tried in order when NewsAPI is unavailable
 _RSS_FEEDS = [
@@ -82,7 +82,7 @@ def _parse_rss(url: str, source_name: str) -> list[dict]:
     return items
 
 
-@registry.tool(name="get_headlines", description="Fetch recent news headlines with source and URL")
+@mcp.tool(name="get_headlines", description="Fetch recent news headlines with source and URL")
 def get_headlines() -> list:
     # ── NewsAPI path ────────────────────────────────────────────────────────
     api_key = Config.NEWSAPI_API_KEY
@@ -126,4 +126,8 @@ def get_headlines() -> list:
 
 class NewsTool:
     def get_headlines(self) -> list:
-        return registry.call("get_headlines")
+        return get_headlines()
+
+
+if __name__ == "__main__":
+    mcp.run()

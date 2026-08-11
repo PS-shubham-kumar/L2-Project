@@ -1,6 +1,7 @@
 'use strict';
 /* ============================================================
-   Commute Commander — app.js  (refined agentic UI)
+   Commute Commander — app.js
+   Production-grade agentic morning briefing UI
    ============================================================ */
 
 const $ = id => document.getElementById(id);
@@ -40,20 +41,19 @@ const uvProgress      = $('uv-progress');
 const uvPct           = $('uv-pct');
 const newsMiniSub     = $('news-mini-sub');
 const newsMiniFoot    = $('news-mini-foot');
-const timerSub        = $('timer-sub');
-const timerFoot       = $('timer-foot');
-const timerProgress   = $('timer-progress');
-const timerPct        = $('timer-pct');
-const timerStartBtn   = $('timer-start-btn');
+const recipeStepsSub    = $('recipe-steps-sub');
+const recipeStepsList   = $('recipe-steps-list');
+const recipeStepsFoot   = $('recipe-steps-foot');
 
 // News panel
 const newsFeedPanel  = $('news-feed-panel');
 
-// Modal
+// Modal — using strict references to avoid event-bubbling bugs
 const detailModal   = $('detail-modal');
 const modalTitle    = $('modal-title');
 const modalBody     = $('modal-body');
 const modalClose    = $('modal-close');
+const modalBox      = $('modal-box');
 const modalBackdrop = $('modal-backdrop');
 
 // Toast
@@ -61,12 +61,10 @@ const toastEl = $('toast');
 
 /* ── State ── */
 let state = {
-  sessionId: null,
-  intent: null,
-  sections: {},
-  timerTotal: 0,
-  timerElapsed: 0,
-  timerHandle: null,
+  sessionId:   null,
+  intent:      null,
+  sections:    {},
+  isModalOpen: false,
 };
 
 /* ── Utilities ── */
@@ -75,20 +73,48 @@ function showToast(msg, type = '') {
   toastEl.className = `toast${type ? ' toast-' + type : ''}`;
   toastEl.classList.remove('hidden');
   clearTimeout(toastEl._t);
-  toastEl._t = setTimeout(() => toastEl.classList.add('hidden'), 3000);
+  toastEl._t = setTimeout(() => toastEl.classList.add('hidden'), 3500);
 }
 
+/* ── Modal helpers (Bug Fix: strict event handling) ── */
 function openModal(title, html) {
   modalTitle.textContent = title;
   modalBody.innerHTML = html;
   detailModal.classList.remove('hidden');
-  modalClose.focus();
+  state.isModalOpen = true;
+  // Move focus to the close button for accessibility
+  requestAnimationFrame(() => modalClose.focus());
 }
-function closeModal() { detailModal.classList.add('hidden'); }
 
+function closeModal() {
+  detailModal.classList.add('hidden');
+  state.isModalOpen = false;
+}
+
+// Close button — stopPropagation prevents bubbling to data-expand delegation
+modalClose.addEventListener('click', e => {
+  e.stopPropagation();
+  closeModal();
+});
+
+// Backdrop — only close if the user clicked the backdrop itself, not the modal box
+modalBackdrop.addEventListener('click', e => {
+  if (e.target === modalBackdrop) closeModal();
+});
+
+// Escape key
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && state.isModalOpen) {
+    e.preventDefault();
+    closeModal();
+  }
+});
+
+/* ── Loading ── */
 function setLoading(on) {
   submitBtn.disabled = on;
   submitBtn.title = on ? 'Working…' : 'Create briefing';
+  submitBtn.setAttribute('aria-busy', on ? 'true' : 'false');
 }
 
 function setSkeleton(el, white = false) {
@@ -133,7 +159,7 @@ function drawSparkline(hourly) {
     const cx2 = pts[i+1].x - (pts[i+1].x-pts[i].x)/3;
     d += ` C ${cx1} ${pts[i].y}, ${cx2} ${pts[i+1].y}, ${pts[i+1].x} ${pts[i+1].y}`;
   }
-  tempLinePath.setAttribute('d', d);
+  if (tempLinePath) tempLinePath.setAttribute('d', d);
 
   const up = uvs.map((u,i) => ({x:px(i), y:pyU(u)}));
   let ud = `M ${up[0].x} ${H} L ${up[0].x} ${up[0].y}`;
@@ -143,7 +169,7 @@ function drawSparkline(hourly) {
     ud += ` C ${cx1} ${up[i].y}, ${cx2} ${up[i+1].y}, ${up[i+1].x} ${up[i+1].y}`;
   }
   ud += ` L ${up[up.length-1].x} ${H} Z`;
-  uvBandPath.setAttribute('d', ud);
+  if (uvBandPath) uvBandPath.setAttribute('d', ud);
 }
 
 /* ── Card renderers ── */
@@ -182,9 +208,20 @@ function renderCommute(payload) {
   const eta       = d.eta_minutes || '--';
   const dist      = d.distance_km ? ` · ${d.distance_km} km` : '';
 
-  commuteSubtitle.textContent = d.alerts?.length
-    ? d.alerts[0]
-    : `${modeLabel} recommended${dist}`;
+  // Show origin → destination route if available, otherwise show alert or mode
+  let subtitle = '';
+  if (d.origin?.label && d.dest?.label) {
+    const originShort = d.origin.label.split(',')[0];
+    const destShort   = d.dest.label.split(',')[0];
+    subtitle = `${originShort} → ${destShort}`;
+    if (d.alerts?.length) subtitle += ` · ${d.alerts[0]}`;
+  } else if (d.alerts?.length) {
+    subtitle = d.alerts[0];
+  } else {
+    subtitle = `${modeLabel} recommended${dist}`;
+  }
+
+  commuteSubtitle.textContent = subtitle;
   commuteEtaBadge.textContent = `${eta} min`;
 
   clearSkeleton(metricEta); clearSkeleton(metricEtaSub);
@@ -201,13 +238,30 @@ function renderBreakfast(payload) {
   breakfastSubtitle.textContent = d.recipe_name || 'Quick recipe';
   const prep = d.prep_time_minutes || 0;
   breakfastTimeBadge.textContent = `${prep} min`;
-  clearSkeleton(timerSub); clearSkeleton(timerFoot);
-  timerSub.textContent = `${d.recipe_name} · ${prep} min`;
-  timerFoot.textContent = `0 / ${prep} min`;
-  timerProgress.style.width = '0%';
-  timerPct.textContent = '0%';
-  state.timerTotal = prep * 60;
-  state.timerElapsed = 0;
+
+  // Recipe Steps mini-card
+  if (recipeStepsSub) {
+    clearSkeleton(recipeStepsSub);
+    const steps = d.steps || [];
+    const stepCount = steps.length;
+    recipeStepsSub.textContent = stepCount
+      ? `${d.recipe_name}${d.area ? ' · ' + d.area : ''}`
+      : (d.recipe_name || 'Quick recipe');
+
+    if (recipeStepsList && stepCount > 0) {
+      recipeStepsList.classList.remove('hidden');
+      // Show first 3 steps inline
+      recipeStepsList.innerHTML = steps.slice(0, 3).map(
+        s => `<li>${escHtml(String(s))}</li>`
+      ).join('');
+    }
+
+    if (recipeStepsFoot) {
+      recipeStepsFoot.textContent = stepCount
+        ? `${stepCount} step${stepCount !== 1 ? 's' : ''} · ${prep} min prep`
+        : `${prep} min prep`;
+    }
+  }
 }
 
 function renderNews(payload) {
@@ -255,13 +309,30 @@ function renderCardError(section, message) {
 
 function renderIntentChips(intent) {
   if (!intent?.location) return;
-  $('chip-location').textContent = intent.location;
+
+  // Location chip
+  const locChip = $('chip-location');
+  if (locChip) locChip.textContent = `📍 ${intent.location}`;
+
+  // Destination chip — show only if a destination was extracted
+  const destChip = $('chip-destination');
+  if (destChip) {
+    if (intent.destination) {
+      destChip.textContent = `→ ${intent.destination}`;
+      destChip.classList.remove('hidden');
+    } else {
+      destChip.classList.add('hidden');
+    }
+  }
+
+  // Section chips
   ['weather','commute','news','breakfast'].forEach(sec => {
     const chip = $('chip-' + sec); if (!chip) return;
     intent.sections?.includes(sec)
       ? chip.classList.remove('hidden')
       : chip.classList.add('hidden');
   });
+
   intentConfirm.classList.remove('hidden');
 }
 
@@ -296,9 +367,8 @@ const _TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">Ope
 
 function _ensureMap(lat, lon) {
   if (_leafletMap) return;
-  // Hide the empty-state placeholder
-  mapEmptyState.classList.add('hidden');
-  mapEl.classList.remove('hidden');
+  // Hide the empty-state placeholder and show the map div
+  if (mapEmptyState) mapEmptyState.classList.add('hidden');
 
   _leafletMap = L.map('commute-map', {
     zoomControl:       true,
@@ -308,10 +378,13 @@ function _ensureMap(lat, lon) {
 
   L.tileLayer(_TILE_URL, {
     attribution: _TILE_ATTR,
-    maxZoom: 18,
+    maxZoom: 19,
   }).addTo(_leafletMap);
 
   _leafletMap.setView([lat, lon], 12);
+
+  // Force Leaflet to recalculate container size (needed when div was hidden/zero-size)
+  setTimeout(() => { if (_leafletMap) _leafletMap.invalidateSize(); }, 200);
 }
 
 function _makePinIcon(color) {
@@ -328,11 +401,14 @@ function _makePinIcon(color) {
   });
 }
 
-const _ORIGIN_ICON = _makePinIcon('#7260c3');   // purple
-const _DEST_ICON   = _makePinIcon('#f06a9a');   // pink
+let _ORIGIN_ICON = null;
+let _DEST_ICON   = null;
 
 function renderCommuteMap(data) {
   if (!data) return;
+
+  if (!_ORIGIN_ICON) _ORIGIN_ICON = _makePinIcon('#7260c3');
+  if (!_DEST_ICON)   _DEST_ICON   = _makePinIcon('#f06a9a');
 
   const origin   = data.origin || {};
   const dest     = data.dest   || {};
@@ -369,6 +445,7 @@ function renderCommuteMap(data) {
 
     // Fit map to the route bounds with a little padding
     _leafletMap.fitBounds(routeLine.getBounds(), { padding: [20, 20] });
+    setTimeout(() => { if (_leafletMap) _leafletMap.invalidateSize(); }, 300);
   } else {
     // No polyline — just set view between the two points
     const mid = [
@@ -376,6 +453,7 @@ function renderCommuteMap(data) {
       (origin.lon + dest.lon) / 2,
     ];
     _leafletMap.setView(mid, 12);
+    setTimeout(() => { if (_leafletMap) _leafletMap.invalidateSize(); }, 300);
   }
 
   // ── Alternate route polylines (dimmed) ─────────────────────
@@ -438,6 +516,28 @@ async function fetchHistory() {
   return res.json();
 }
 
+/* ── SSE streaming briefing ── */
+function streamBriefing(sessionId) {
+  const es = new EventSource(`/api/briefing/${sessionId}/stream`);
+  es.onmessage = e => {
+    try {
+      const payload = JSON.parse(e.data);
+      if (payload.event === 'done') {
+        es.close();
+        dashControls.classList.remove('hidden');
+        setLoading(false);
+        return;
+      }
+      if (payload.section) dispatchSection(payload.section, payload);
+    } catch { /* ignore malformed events */ }
+  };
+  es.onerror = () => {
+    es.close();
+    dashControls.classList.remove('hidden');
+    setLoading(false);
+  };
+}
+
 /* ── Submit ── */
 form.addEventListener('submit', async e => {
   e.preventDefault();
@@ -452,12 +552,16 @@ form.addEventListener('submit', async e => {
   dashControls.classList.add('hidden');
   newsFeedPanel.innerHTML = '<p class="empty-state">Loading headlines…</p>';
 
+  // Reset commute subtitle to avoid stale data
+  if (commuteSubtitle) {
+    commuteSubtitle.style.color = '';
+  }
+
   // Skeletons on cards
   [heroTemp, heroCondition, metricTemp, metricEta, metricUv].forEach(el => setSkeleton(el, true));
   [commuteSubtitle, commuteEtaBadge, breakfastSubtitle, breakfastTimeBadge,
-   weatherMiniSub, newsMiniSub, timerSub].forEach(el => setSkeleton(el));
+   weatherMiniSub, newsMiniSub, recipeStepsSub].forEach(el => setSkeleton(el));
 
-  // Update topbar
   $('topbar-heading').textContent = 'Getting your briefing…';
 
   try {
@@ -467,20 +571,21 @@ form.addEventListener('submit', async e => {
 
     $('topbar-heading').textContent = 'Here\'s your briefing';
     $('topbar-eyebrow').textContent = data.intent?.location || 'Commute Commander';
-
     renderIntentChips(data.intent);
 
+    // Render sections from the initial POST response first (fast path),
+    // then open the SSE stream so any slower agents still arrive as cards.
     const sections = data.sections || {};
     ['weather','commute','breakfast','news'].forEach(sec => {
       if (sections[sec]) dispatchSection(sec, sections[sec]);
     });
 
-    dashControls.classList.remove('hidden');
+    // SSE stream picks up any sections not yet in the POST response
+    streamBriefing(data.session_id);
   } catch (err) {
     $('topbar-heading').textContent = 'Something went wrong';
     showToast(err.message || 'Could not create briefing.', 'error');
     ['weather','commute','breakfast','news'].forEach(sec => renderCardError(sec, null));
-  } finally {
     setLoading(false);
   }
 });
@@ -495,6 +600,8 @@ document.querySelectorAll('.example-chip').forEach(btn => {
 
 /* ── Refresh delegation ── */
 document.addEventListener('click', async e => {
+  // Don't process if modal is open to avoid accidental clicks
+  if (state.isModalOpen) return;
   const btn = e.target.closest('[data-refresh]');
   if (!btn || !state.sessionId) return;
   const section = btn.dataset.refresh;
@@ -502,7 +609,7 @@ document.addEventListener('click', async e => {
   try {
     const payload = await refreshSection(state.sessionId, section);
     dispatchSection(section, payload);
-    showToast(`${section} refreshed`, 'success');
+    showToast(`${section} refreshed ✓`, 'success');
   } catch (err) {
     showToast(err.message, 'error');
   } finally {
@@ -512,6 +619,8 @@ document.addEventListener('click', async e => {
 
 /* ── Expand delegation ── */
 document.addEventListener('click', e => {
+  // Skip if modal is already open
+  if (state.isModalOpen) return;
   const btn = e.target.closest('[data-expand]');
   if (!btn) return;
   const section = btn.dataset.expand;
@@ -609,34 +718,9 @@ if (swapBtn) swapBtn.addEventListener('click', async () => {
   try {
     const payload = await refreshSection(state.sessionId, 'breakfast');
     dispatchSection('breakfast', payload);
-    showToast('New recipe loaded', 'success');
+    showToast('New recipe loaded ✓', 'success');
   } catch(err) { showToast(err.message,'error'); }
   finally { swapBtn.disabled = false; }
-});
-
-/* ── Prep timer ── */
-timerStartBtn.addEventListener('click', () => {
-  if (state.timerHandle) {
-    clearInterval(state.timerHandle); state.timerHandle = null;
-    timerStartBtn.textContent = 'Resume'; return;
-  }
-  if (!state.timerTotal) return;
-  timerStartBtn.textContent = 'Pause';
-  state.timerHandle = setInterval(() => {
-    state.timerElapsed++;
-    const pct = Math.min(Math.round((state.timerElapsed/state.timerTotal)*100), 100);
-    const elMin = Math.floor(state.timerElapsed/60);
-    const totMin = Math.round(state.timerTotal/60);
-    timerProgress.style.width = `${pct}%`;
-    timerProgress.setAttribute('aria-valuenow', pct);
-    timerPct.textContent = `${pct}%`;
-    timerFoot.textContent = `${elMin} / ${totMin} min`;
-    if (state.timerElapsed >= state.timerTotal) {
-      clearInterval(state.timerHandle); state.timerHandle = null;
-      timerStartBtn.textContent = 'Done!';
-      showToast('Breakfast is ready! 🍳', 'success');
-    }
-  }, 1000);
 });
 
 /* ── Period chips ── */
@@ -663,7 +747,7 @@ rerunBtn?.addEventListener('click', async () => {
     ['weather', 'commute', 'breakfast', 'news'].forEach(sec => {
       if (sections[sec]) dispatchSection(sec, sections[sec]);
     });
-    showToast('Briefing refreshed', 'success');
+    showToast('Briefing refreshed ✓', 'success');
   } catch (err) {
     showToast(err.message, 'error');
   } finally {
@@ -677,7 +761,7 @@ saveBtn?.addEventListener('click', async () => {
   try {
     const res = await fetch(`/api/briefing/${state.sessionId}/save`, {method:'POST'});
     const d = await res.json();
-    showToast(d.saved ? 'Briefing saved!' : (d.error?.message||'Not saved — retry?'), d.saved ? 'success' : 'error');
+    showToast(d.saved ? 'Briefing saved! ✓' : (d.error?.message||'Not saved — retry?'), d.saved ? 'success' : 'error');
   } catch { showToast('Save failed — retry?','error'); }
   finally { saveBtn.disabled = false; }
 });
@@ -736,15 +820,42 @@ async function loadHistory() {
   }
 }
 
-/* ── Settings form ── */
-$('settings-form')?.addEventListener('submit', e => {
+/* ── Settings ── */
+async function loadSettings() {
+  try {
+    const res = await fetch('/api/settings');
+    if (!res.ok) return;
+    const s = await res.json();
+    const locEl = $('setting-location');
+    const unitsEl = $('setting-units');
+    if (locEl) locEl.value = s.default_location || '';
+    if (unitsEl) unitsEl.value = s.units || 'metric';
+    document.querySelectorAll('#settings-form input[type=checkbox]').forEach(cb => {
+      cb.checked = (s.default_sections || []).includes(cb.value);
+    });
+  } catch { /* silently ignore */ }
+}
+
+$('settings-form')?.addEventListener('submit', async e => {
   e.preventDefault();
-  showToast('Preferences saved!', 'success');
+  const sections = [...document.querySelectorAll('#settings-form input[type=checkbox]:checked')]
+    .map(cb => cb.value);
+  const body = {
+    default_location: $('setting-location')?.value.trim() || '',
+    units:            $('setting-units')?.value || 'metric',
+    default_sections: sections,
+  };
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    showToast(res.ok ? 'Preferences saved! ✓' : 'Save failed — retry?', res.ok ? 'success' : 'error');
+  } catch { showToast('Save failed — retry?', 'error'); }
 });
 
-/* ── Modal close ── */
-modalClose.addEventListener('click', closeModal);
-modalBackdrop.addEventListener('click', closeModal);
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && !detailModal.classList.contains('hidden')) closeModal();
+// Pre-fill settings when the view opens
+document.querySelectorAll('.nav-item[data-view]').forEach(btn => {
+  if (btn.dataset.view === 'settings') btn.addEventListener('click', loadSettings, {once: false});
 });

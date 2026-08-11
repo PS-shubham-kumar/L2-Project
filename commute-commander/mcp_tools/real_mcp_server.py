@@ -1,24 +1,26 @@
-import os
+import asyncio
 from typing import Any, Callable, Dict, List
+from fastmcp import FastMCP
 
 
 class RealMCPServer:
-    """A small MCP-like server that registers tools and exposes them to agents."""
+    """An MCP server wrapping FastMCP from the official MCP SDK."""
 
     def __init__(self, name: str) -> None:
         self.name = name
-        self.tools: Dict[str, Callable[..., Any]] = {}
+        self.fast_mcp = FastMCP(name)
 
     def register_tool(self, name: str, func: Callable[..., Any]) -> None:
-        self.tools[name] = func
+        self.fast_mcp.tool(name=name)(func)
 
     def list_tools(self) -> List[str]:
-        return list(self.tools.keys())
+        tools_list = asyncio.run(self.fast_mcp.list_tools())
+        return [t.name for t in tools_list]
 
     def call_tool(self, name: str, *args, **kwargs) -> Any:
-        if name not in self.tools:
-            raise KeyError(f"Tool '{name}' not found on server '{self.name}'.")
-        return self.tools[name](*args, **kwargs)
+        tool = asyncio.run(self.fast_mcp.get_tool(name))
+        return tool.fn(*args, **kwargs)
 
     def health_check(self) -> Dict[str, Any]:
-        return {"server": self.name, "tool_count": len(self.tools), "status": "ok"}
+        tools_list = asyncio.run(self.fast_mcp.list_tools())
+        return {"server": self.name, "tool_count": len(tools_list), "status": "ok"}

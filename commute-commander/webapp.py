@@ -8,16 +8,20 @@ Endpoints
 GET  /api/history                              list past sessions (newest 20)
 GET  /api/history/{session_id}                 full session detail
 GET  /api/briefing/{session_id}/{section}      poll one section
+GET  /api/briefing/{session_id}/stream         SSE stream — one event per agent
 POST /api/briefing                             run full briefing, returns structured JSON
 POST /api/briefing/{session_id}/{section}/refresh   re-run one agent
 POST /api/briefing/{session_id}/save           pin/save a briefing to disk
 POST /api/briefing/{session_id}/rerun          re-run all agents with current intent
 PATCH /api/briefing/{session_id}/intent        update intent fields, optionally re-run
+GET  /api/settings                             load user settings
+PUT  /api/settings                             save user settings
 """
 
 from __future__ import annotations
 
 import json
+import queue
 import re
 import threading
 from http import HTTPStatus
@@ -26,13 +30,15 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from agents.orchestrator import OrchestratorAgent
-from services.session_manager import SessionManager
+from services.db import SQLiteSessionManager
+from services.settings_manager import SettingsManager
 
 
 ROOT             = Path(__file__).resolve().parent
 STATIC_DIRECTORY = ROOT / "web"
-session_manager  = SessionManager()
+session_manager  = SQLiteSessionManager()
 orchestrator     = OrchestratorAgent(session_manager=session_manager)
+settings_manager = SettingsManager()
 
 # ── URL patterns ────────────────────────────────────────────
 _SECTION_RE = r"(?P<section>weather|news|commute|breakfast)"
@@ -44,7 +50,9 @@ _RE_SECTION_REFRESH = re.compile(rf"^/api/briefing/{_SID_RE}/{_SECTION_RE}/refre
 _RE_SAVE            = re.compile(rf"^/api/briefing/{_SID_RE}/save$")
 _RE_RERUN           = re.compile(rf"^/api/briefing/{_SID_RE}/rerun$")
 _RE_INTENT          = re.compile(rf"^/api/briefing/{_SID_RE}/intent$")
+_RE_STREAM          = re.compile(rf"^/api/briefing/{_SID_RE}/stream$")
 _RE_HISTORY_DETAIL  = re.compile(rf"^/api/history/{_SID_RE}$")
+_RE_SETTINGS        = re.compile(r"^/api/settings$")
 
 
 def _get_intent(session_id: str) -> dict:
@@ -66,9 +74,18 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
             self._handle_history_list()
             return
 
+        if _RE_SETTINGS.match(path):
+            self._handle_settings_get()
+            return
+
         m = _RE_HISTORY_DETAIL.match(path)
         if m:
             self._handle_history_detail(m.group("session_id"))
+            return
+
+        m = _RE_STREAM.match(path)
+        if m:
+            self._handle_stream(m.group("session_id"))
             return
 
         m = _RE_SECTION_POLL.match(path)
@@ -103,6 +120,16 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
 
         self.send_error(HTTPStatus.NOT_FOUND, "Endpoint not found")
 
+    # ── PUT ──────────────────────────────────────────────────
+    def do_PUT(self) -> None:  # noqa: N802
+        path = urlparse(self.path).path
+
+        if _RE_SETTINGS.match(path):
+            self._handle_settings_put()
+            return
+
+        self.send_error(HTTPStatus.NOT_FOUND, "Endpoint not found")
+
     # ── PATCH ────────────────────────────────────────────────
     def do_PATCH(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
@@ -113,6 +140,73 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
             return
 
         self.send_error(HTTPStatus.NOT_FOUND, "Endpoint not found")
+
+    def _handle_stream(self, session_id: str) -> None:
+        """GET /api/briefing/{id}/stream — SSE: emits one JSON event per agent."""
+        intent = _get_intent(session_id)
+        if not intent:
+            self.send_error(HTTPStatus.NOT_FOUND, "Session not found")
+            return
+
+        sections: list[str] = intent.get("sections", [])
+
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type",  "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+
+        # Run each agent in its own thread; collect results via a queue
+        result_q: queue.Queue = queue.Queue()
+
+        def _run_section(sec: str) -> None:
+            try:
+                result = orchestrator.run_section(sec, intent)
+            except Exception as exc:
+                result = {
+                    "section": sec, "status": "error",
+                    "error": {"code": "agent_error", "message": str(exc)},
+                }
+            result_q.put(result)
+
+        threads = [threading.Thread(target=_run_section, args=(s,), daemon=True) for s in sections]
+        for t in threads:
+            t.start()
+
+        received = 0
+        total = len(sections)
+        try:
+            while received < total:
+                try:
+                    result = result_q.get(timeout=35)
+                except queue.Empty:
+                    break
+                payload = json.dumps(result, default=str)
+                self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
+                self.wfile.flush()
+                received += 1
+
+            # Terminal event so the client knows the stream is done
+            self.wfile.write(b"data: {\"event\": \"done\"}\n\n")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # client disconnected
+
+    # ── Settings handlers ────────────────────────────────────
+
+    def _handle_settings_get(self) -> None:
+        """GET /api/settings"""
+        self._send_json(HTTPStatus.OK, settings_manager.load())
+
+    def _handle_settings_put(self) -> None:
+        """PUT /api/settings"""
+        try:
+            body = self._read_json_body()
+            updated = settings_manager.save(body)
+            self._send_json(HTTPStatus.OK, updated)
+        except (ValueError, json.JSONDecodeError) as exc:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
 
     # ── Route handlers ───────────────────────────────────────
 
@@ -249,7 +343,7 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
                 intent = {}
 
             # Merge only recognised fields
-            for field in ("location", "sections", "ingredients", "time_constraint", "travel_intent"):
+            for field in ("location", "destination", "sections", "ingredients", "time_constraint", "travel_intent"):
                 if field in body:
                     intent[field] = body[field]
 
@@ -302,7 +396,7 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     server = ThreadingHTTPServer(("127.0.0.1", 8000), CommuteCommanderHandler)
-    print("Commute Commander → http://localhost:8000")
+    print("Commute Commander -> http://localhost:8000")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

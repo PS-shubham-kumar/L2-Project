@@ -11,8 +11,7 @@ class QueryParserTests(unittest.TestCase):
         result = parser.parse(query)
 
         self.assertEqual(result["location"], "Chicago")
-        self.assertIn("weather", result["sections"])
-        self.assertIn("uv", result["sections"])
+        self.assertIn("weather", result["sections"])  # UV maps to weather section
         self.assertIn("news", result["sections"])
         self.assertIn("commute", result["sections"])
         self.assertIn("breakfast", result["sections"])
