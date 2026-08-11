@@ -1,3 +1,16 @@
+"""CLI entry point for Commute Commander.
+
+Run with:  python scripts/main.py
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# Add src/ to path so package imports resolve
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_PROJECT_ROOT / "src"))
+
 from agents.orchestrator import OrchestratorAgent
 from services.session_manager import SessionManager
 

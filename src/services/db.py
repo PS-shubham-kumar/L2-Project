@@ -1,6 +1,6 @@
 """SQLite-backed session persistence — Phase 6 replacement for JSON file sessions.
 
-Database: sessions/sessions.db
+Database: data/sessions.db
 Tables:
   sessions     — one row per session (metadata + intent + saved flag)
   interactions — one row per interaction, FK to sessions
@@ -15,7 +15,11 @@ import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Generator, List
+
+# Default: project_root/data (two levels above src/services/)
+_DEFAULT_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -46,7 +50,7 @@ class SQLiteSessionManager:
     """SQLite-backed session manager — same public API as SessionManager."""
 
     def __init__(self, storage_dir: str | None = None) -> None:
-        self._dir = storage_dir or os.path.join(os.getcwd(), "sessions")
+        self._dir = storage_dir or str(_DEFAULT_DATA_DIR)
         os.makedirs(self._dir, exist_ok=True)
         self._db_path = os.path.join(self._dir, "sessions.db")
         self._init_db()

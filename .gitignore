@@ -20,7 +20,8 @@ ENV/
 *.env
 
 # Session data (runtime-generated)
-commute-commander/sessions/*.json
+data/sessions/*.json
+data/sessions.db
 
 # IDE
 .vscode/
@@ -33,3 +34,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Pytest
+.pytest_cache/

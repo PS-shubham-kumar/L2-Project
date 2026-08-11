@@ -17,12 +17,16 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List
+
+# Default: project_root/data/sessions (three levels above src/services/)
+_DEFAULT_SESSION_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "sessions"
 
 
 class SessionManager:
     def __init__(self, storage_dir: str | None = None) -> None:
-        self.storage_dir = storage_dir or os.path.join(os.getcwd(), "sessions")
+        self.storage_dir = storage_dir or str(_DEFAULT_SESSION_DIR)
         os.makedirs(self.storage_dir, exist_ok=True)
 
     # ------------------------------------------------------------------ public

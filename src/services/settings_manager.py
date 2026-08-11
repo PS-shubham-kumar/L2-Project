@@ -12,7 +12,11 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any, Dict
+
+# Default: project_root/config (two levels above src/services/)
+_DEFAULT_CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "config"
 
 _DEFAULTS: Dict[str, Any] = {
     "default_location": "",
@@ -28,7 +32,7 @@ _ALLOWED_UNITS    = {"metric", "imperial"}
 class SettingsManager:
     def __init__(self, storage_dir: str | None = None) -> None:
         self._path = os.path.join(
-            storage_dir or os.getcwd(), "settings.json"
+            storage_dir or str(_DEFAULT_CONFIG_DIR), "settings.json"
         )
 
     def load(self) -> Dict[str, Any]:

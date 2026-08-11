@@ -3,7 +3,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Resolve .env relative to this file — works regardless of CWD
-_ENV_PATH = Path(__file__).parent.parent / ".env"
+# src/services/config.py → src/ → project root → .env
+_ENV_PATH = Path(__file__).parent.parent.parent / ".env"
 load_dotenv(dotenv_path=_ENV_PATH)
 
 

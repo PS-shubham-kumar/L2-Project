@@ -1,6 +1,6 @@
 """Commute Commander web server.
 
-Run with:  python webapp.py
+Run with:  python scripts/webapp.py
 Visit:     http://localhost:8000
 
 Endpoints
@@ -23,24 +23,32 @@ from __future__ import annotations
 import json
 import queue
 import re
+import sys
 import threading
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
+# ── Resolve project root and add src/ to import path ────────────────────────
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+SRC_DIR      = PROJECT_ROOT / "src"
+sys.path.insert(0, str(SRC_DIR))
+
 from agents.orchestrator import OrchestratorAgent
 from services.db import SQLiteSessionManager
 from services.settings_manager import SettingsManager
 
 
-ROOT             = Path(__file__).resolve().parent
-STATIC_DIRECTORY = ROOT / "web"
-session_manager  = SQLiteSessionManager()
-orchestrator     = OrchestratorAgent(session_manager=session_manager)
-settings_manager = SettingsManager()
+ROOT             = PROJECT_ROOT
+STATIC_DIRECTORY = ROOT / "frontend"
+DATA_DIR         = ROOT / "data"
 
-# ── URL patterns ────────────────────────────────────────────
+session_manager  = SQLiteSessionManager(storage_dir=str(DATA_DIR))
+orchestrator     = OrchestratorAgent(session_manager=session_manager)
+settings_manager = SettingsManager(storage_dir=str(ROOT / "config"))
+
+# ── URL patterns ────────────────────────────────────────────────────────────
 _SECTION_RE = r"(?P<section>weather|news|commute|breakfast)"
 _SID_RE     = r"(?P<session_id>[^/]+)"
 
@@ -66,7 +74,7 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIRECTORY), **kwargs)
 
-    # ── GET ─────────────────────────────────────────────────
+    # ── GET ─────────────────────────────────────────────────────────────────
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
 
@@ -95,7 +103,7 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
 
         super().do_GET()
 
-    # ── POST ─────────────────────────────────────────────────
+    # ── POST ─────────────────────────────────────────────────────────────────
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
 
@@ -120,7 +128,7 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
 
         self.send_error(HTTPStatus.NOT_FOUND, "Endpoint not found")
 
-    # ── PUT ──────────────────────────────────────────────────
+    # ── PUT ──────────────────────────────────────────────────────────────────
     def do_PUT(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
 
@@ -130,7 +138,7 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
 
         self.send_error(HTTPStatus.NOT_FOUND, "Endpoint not found")
 
-    # ── PATCH ────────────────────────────────────────────────
+    # ── PATCH ────────────────────────────────────────────────────────────────
     def do_PATCH(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
 
@@ -188,12 +196,12 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
                 received += 1
 
             # Terminal event so the client knows the stream is done
-            self.wfile.write(b"data: {\"event\": \"done\"}\n\n")
+            self.wfile.write(b'data: {"event": "done"}\n\n')
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass  # client disconnected
 
-    # ── Settings handlers ────────────────────────────────────
+    # ── Settings handlers ────────────────────────────────────────────────────
 
     def _handle_settings_get(self) -> None:
         """GET /api/settings"""
@@ -208,13 +216,13 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
         except (ValueError, json.JSONDecodeError) as exc:
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
 
-    # ── Route handlers ───────────────────────────────────────
+    # ── Route handlers ───────────────────────────────────────────────────────
 
     def _handle_briefing(self) -> None:
         """POST /api/briefing — main entry point."""
         try:
-            body   = self._read_json_body()
-            query  = str(body.get("query", "")).strip()
+            body    = self._read_json_body()
+            query   = str(body.get("query", "")).strip()
             user_id = str(body.get("user_id", "guest")).strip() or "guest"
 
             if not query:
@@ -222,8 +230,6 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
 
             session_id = session_manager.start_session(user_id)
 
-            # Run structured with a 30-second hard timeout so the browser
-            # never hangs silently if an upstream API is slow.
             result_box: dict = {}
             error_box:  list = []
 
@@ -247,8 +253,6 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
                 )
 
             structured = result_box["data"]
-
-            # Persist intent to disk so it survives restarts
             intent = structured.get("intent", {})
             session_manager.save_intent(session_id, intent)
 
@@ -295,7 +299,6 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
 
     def _handle_save(self, session_id: str) -> None:
         """POST /api/briefing/{id}/save — pin the current briefing."""
-        # Re-run all sections with the stored intent so we have fresh data to persist
         intent = _get_intent(session_id)
         if not intent:
             self._send_json(
@@ -342,7 +345,6 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
             if not intent:
                 intent = {}
 
-            # Merge only recognised fields
             for field in ("location", "destination", "sections", "ingredients", "time_constraint", "travel_intent"):
                 if field in body:
                     intent[field] = body[field]
@@ -375,7 +377,7 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
             return
         self._send_json(HTTPStatus.OK, data)
 
-    # ── Helpers ──────────────────────────────────────────────
+    # ── Helpers ──────────────────────────────────────────────────────────────
 
     def _read_json_body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
