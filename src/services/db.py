@@ -186,3 +186,23 @@ class SQLiteSessionManager:
                     "sections":   intent.get("sections", []),
                 })
         return summaries
+
+    def delete_session(self, session_id: str) -> bool:
+        """Delete a single session and its associated interactions."""
+        try:
+            with self._conn() as conn:
+                conn.execute("DELETE FROM interactions WHERE session_id=?", (session_id,))
+                cur = conn.execute("DELETE FROM sessions WHERE session_id=?", (session_id,))
+                return cur.rowcount > 0
+        except Exception:
+            return False
+
+    def clear_history(self) -> bool:
+        """Clear all sessions and interactions from the database."""
+        try:
+            with self._conn() as conn:
+                conn.execute("DELETE FROM interactions")
+                conn.execute("DELETE FROM sessions")
+                return True
+        except Exception:
+            return False

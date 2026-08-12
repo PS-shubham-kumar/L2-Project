@@ -25,7 +25,7 @@ class CommuteAgent:
         return f"## Commute\n- {advice}"
 
     # ── Structured (web API §3.3 + polyline) ──────────────────────────────
-    def run_structured(self, location: str, destination: str = "") -> dict:
+    def run_structured(self, location: str, destination: str = "", mode: str = "drive") -> dict:
         """Return typed dict matching API contract §3.3 shape.
 
         Extra non-contract fields accepted by the UI:
@@ -36,7 +36,7 @@ class CommuteAgent:
           data.source        "tomtom" | "advisory"
         """
         try:
-            raw = self.tool.get_commute_route(location, destination)
+            raw = self.tool.get_commute_route(location, destination, mode)
         except Exception as exc:
             return {
                 "section": "commute",

@@ -25,7 +25,7 @@ class QueryParser:
                           r"\btravel\b", r"\broute\b", r"\bdrive\b", r"\bdriving\b",
                           r"\bbus\b", r"\btrain\b", r"\bbike\b", r"\bcycling\b",
                           r"\bwalk\b", r"\bwalking\b", r"\beta\b",
-                          r"\bgoing to\b", r"\bheading to\b", r"\bdrop me\b"],
+                          r"\bgoing to\b", r"\bheading to\b", r"\bheading out to\b", r"\bheading out\b", r"\bdrop me\b"],
             "breakfast": [r"\bbreakfast\b", r"\bmeal\b", r"\brecipe\b", r"\beat\b", r"\bfood\b",
                           r"\bcook\b", r"\bquick bite\b", r"\beggs?\b", r"\btoast\b",
                           r"\boats\b", r"\bporridge\b"],
@@ -46,6 +46,13 @@ class QueryParser:
         ingredients     = self._extract_ingredients(normalized)
         time_constraint = self._extract_time_constraint(normalized)
         travel_intent   = self._extract_travel_intent(normalized)
+
+        # If no explicit origin location was found but destination was extracted,
+        # treat destination as the location (e.g. "heading out to Bangalore"
+        # means the user wants info ABOUT Bangalore).
+        if destination and (not location or location == "current location"):
+            location = destination
+            destination = ""  # clear to avoid trivial self-route
 
         # If destination matches location, clear it (degenerate route)
         if destination and location and destination.lower() == location.lower():
@@ -79,20 +86,29 @@ class QueryParser:
         'going to <Place>', 'drop me at <Place>', 'office in <Place>'.
         Returns empty string if no destination is detected.
         """
-        normalized = query.lower()
+        _dest_noise = {"work", "office", "school", "college", "home", "my", "the"}
 
-        # Pattern 1: "from <origin> to <destination>" — capture after 'to'
+        # Pattern 1: "from <origin> to <destination>" — capture after 'to', case-insensitive
         match = re.search(
-            r"\bfrom\s+[A-Z][a-zA-Z\s,]+?\s+to\s+([A-Z][a-zA-Z\s,]+?)(?:\s+(?:today|tomorrow|this|please|and|,|$)|\s*$)",
-            query,
+            r"\bfrom\s+[\w][\w\s,]+?\s+to\s+([\w][\w\s,]+?)(?:\s+(?:today|tomorrow|this|please|and|,|$)|\s*$)",
+            query, re.IGNORECASE,
         )
         if match:
-            return match.group(1).strip().rstrip(",")
+            return match.group(1).strip().rstrip(",").title()
 
-        # Pattern 2: "to <Place>" (standalone, not part of "going to work")
-        _dest_noise = {"work", "office", "school", "college", "home", "my"}
+        # Pattern 2: "heading out to <Place>" / "heading to <Place>" / "going to <Place>"
         match = re.search(
-            r"\bto\s+([A-Z][a-zA-Z\s,]+?)(?:\s+(?:today|tomorrow|this|please|and|,|$)|\s*$)",
+            r"\b(?:heading(?:\s+out)?|going)\s+to\s+([\w][\w\s,]+?)(?:\s+(?:today|tomorrow|this|please|and|how|,|$)|\s*$)",
+            query, re.IGNORECASE,
+        )
+        if match:
+            dest = match.group(1).strip().rstrip(",")
+            if dest.lower() not in _dest_noise:
+                return dest.title()
+
+        # Pattern 3: "to <Place>" (standalone, not part of "going to work")
+        match = re.search(
+            r"(?<![\w])to\s+([A-Z][a-zA-Z\s,]+?)(?:\s+(?:today|tomorrow|this|please|and|how|,|$)|\s*$)",
             query,
         )
         if match:
@@ -100,31 +116,23 @@ class QueryParser:
             if dest.lower() not in _dest_noise:
                 return dest
 
-        # Pattern 3: "heading to <Place>" / "going to <Place>"
+        # Pattern 4: case-insensitive "to <word(s)>" fallback
         match = re.search(
-            r"\b(?:heading|going)\s+to\s+([A-Z][a-zA-Z\s,]+?)(?:\s+(?:today|tomorrow|this|please|and|,|$)|\s*$)",
-            query,
-        )
-        if match:
-            return match.group(1).strip().rstrip(",")
-
-        # Pattern 4: "drop me at <Place>" / "drop me off at <Place>"
-        match = re.search(
-            r"\bdrop\s+(?:me\s+)?(?:off\s+)?at\s+([A-Z][a-zA-Z\s,]+?)(?:\s+(?:today|tomorrow|this|and|,|$)|\s*$)",
-            query,
-        )
-        if match:
-            return match.group(1).strip().rstrip(",")
-
-        # Pattern 5: lowercase "to <capitalized place>" fallback
-        match = re.search(
-            r"\bto\s+([A-Z][a-zA-Z]{2,}(?:\s+[A-Z][a-zA-Z]+)*)",
-            query,
+            r"\bto\s+([a-zA-Z][a-zA-Z]{2,}(?:\s+[a-zA-Z][a-zA-Z]+)*)",
+            query, re.IGNORECASE,
         )
         if match:
             dest = match.group(1).strip().rstrip(",")
             if dest.lower() not in _dest_noise:
-                return dest
+                return dest.title()
+
+        # Pattern 5: "drop me at <Place>" / "drop me off at <Place>"
+        match = re.search(
+            r"\bdrop\s+(?:me\s+)?(?:off\s+)?at\s+([\w][\w\s,]+?)(?:\s+(?:today|tomorrow|this|and|,|$)|\s*$)",
+            query, re.IGNORECASE,
+        )
+        if match:
+            return match.group(1).strip().rstrip(",").title()
 
         return ""
 

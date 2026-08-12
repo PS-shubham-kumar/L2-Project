@@ -61,6 +61,8 @@ _RE_INTENT          = re.compile(rf"^/api/briefing/{_SID_RE}/intent$")
 _RE_STREAM          = re.compile(rf"^/api/briefing/{_SID_RE}/stream$")
 _RE_HISTORY_DETAIL  = re.compile(rf"^/api/history/{_SID_RE}$")
 _RE_SETTINGS        = re.compile(r"^/api/settings$")
+_RE_COMMUTE         = re.compile(r"^/api/commute$")
+
 
 
 def _get_intent(session_id: str) -> dict:
@@ -111,6 +113,10 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
             self._handle_briefing()
             return
 
+        if _RE_COMMUTE.match(path):
+            self._handle_commute_direct()
+            return
+
         m = _RE_SECTION_REFRESH.match(path)
         if m:
             self._handle_section_refresh(m.group("session_id"), m.group("section"))
@@ -145,6 +151,21 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
         m = _RE_INTENT.match(path)
         if m:
             self._handle_patch_intent(m.group("session_id"))
+            return
+
+        self.send_error(HTTPStatus.NOT_FOUND, "Endpoint not found")
+
+    # ── DELETE ───────────────────────────────────────────────────────────────
+    def do_DELETE(self) -> None:  # noqa: N802
+        path = urlparse(self.path).path
+
+        if path == "/api/history":
+            self._handle_history_clear()
+            return
+
+        m = _RE_HISTORY_DETAIL.match(path)
+        if m:
+            self._handle_history_delete(m.group("session_id"))
             return
 
         self.send_error(HTTPStatus.NOT_FOUND, "Endpoint not found")
@@ -269,10 +290,50 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
 
         except (ValueError, json.JSONDecodeError) as exc:
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
-        except Exception as exc:
             self._send_json(
                 HTTPStatus.INTERNAL_SERVER_ERROR,
                 {"error": f"Could not create the briefing: {exc}"},
+            )
+
+    def _handle_commute_direct(self) -> None:
+        """POST /api/commute — direct routing bypass."""
+        try:
+            body = self._read_json_body()
+            location = str(body.get("from", "")).strip()
+            destination = str(body.get("to", "")).strip()
+            mode = str(body.get("mode", "drive")).strip()
+
+            if not location:
+                raise ValueError("Origin location is required.")
+
+            result_box: dict = {}
+            error_box: list = []
+
+            def _run() -> None:
+                try:
+                    result_box["data"] = orchestrator.commute_agent.run_structured(
+                        location, destination=destination, mode=mode
+                    )
+                except Exception as exc:
+                    error_box.append(exc)
+
+            t = threading.Thread(target=_run, daemon=True)
+            t.start()
+            t.join(timeout=25)
+
+            if error_box:
+                raise error_box[0]
+            if "data" not in result_box:
+                raise TimeoutError("Commute routing timed out.")
+
+            self._send_json(HTTPStatus.OK, result_box["data"])
+
+        except (ValueError, json.JSONDecodeError) as exc:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+        except Exception as exc:
+            self._send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"error": f"Could not calculate commute: {exc}"},
             )
 
     def _handle_section_refresh(self, session_id: str, section: str) -> None:
@@ -376,6 +437,28 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
             )
             return
         self._send_json(HTTPStatus.OK, data)
+
+    def _handle_history_delete(self, session_id: str) -> None:
+        """DELETE /api/history/{session_id}"""
+        try:
+            ok = session_manager.delete_session(session_id)
+            if ok:
+                self._send_json(HTTPStatus.OK, {"deleted": True, "session_id": session_id})
+            else:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": "Session not found or could not be deleted"})
+        except Exception as exc:
+            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+
+    def _handle_history_clear(self) -> None:
+        """DELETE /api/history"""
+        try:
+            ok = session_manager.clear_history()
+            if ok:
+                self._send_json(HTTPStatus.OK, {"cleared": True})
+            else:
+                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Could not clear history"})
+        except Exception as exc:
+            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 

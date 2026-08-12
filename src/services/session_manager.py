@@ -127,6 +127,27 @@ class SessionManager:
                 pass
         return summaries
 
+    def delete_session(self, session_id: str) -> bool:
+        """Delete a single session json file."""
+        try:
+            path = os.path.join(self.storage_dir, f"{session_id}.json")
+            if os.path.exists(path):
+                os.remove(path)
+                return True
+            return False
+        except Exception:
+            return False
+
+    def clear_history(self) -> bool:
+        """Clear all session files in storage directory."""
+        try:
+            for fname in os.listdir(self.storage_dir):
+                if fname.endswith(".json"):
+                    os.remove(os.path.join(self.storage_dir, fname))
+            return True
+        except Exception:
+            return False
+
     # ------------------------------------------------------------------ private
 
     def _write(self, session_id: str, payload: Dict[str, Any]) -> None:

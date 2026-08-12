@@ -48,6 +48,30 @@ class SQLiteSessionManagerTests(unittest.TestCase):
     def test_get_session_not_found(self):
         self.assertIsNone(self.sm.get_session("nonexistent-session"))
 
+    def test_delete_session(self):
+        sid = self.sm.start_session("delete-user")
+        self.sm.log_interaction(sid, {"query": "temporary"})
+        self.assertIsNotNone(self.sm.get_session(sid))
+        
+        # Delete session
+        ok = self.sm.delete_session(sid)
+        self.assertTrue(ok)
+        self.assertIsNone(self.sm.get_session(sid))
+        
+        # Deleting non-existent session
+        ok = self.sm.delete_session("nonexistent-session")
+        self.assertFalse(ok)
+
+    def test_clear_history(self):
+        sid1 = self.sm.start_session("user1")
+        sid2 = self.sm.start_session("user2")
+        self.assertEqual(len(self.sm.list_sessions()), 2)
+        
+        # Clear history
+        ok = self.sm.clear_history()
+        self.assertTrue(ok)
+        self.assertEqual(len(self.sm.list_sessions()), 0)
+
 
 class SettingsManagerTests(unittest.TestCase):
     def setUp(self):

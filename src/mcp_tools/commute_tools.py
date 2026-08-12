@@ -221,83 +221,115 @@ def _call_ors_route(
     name="get_commute_route",
     description="Get real commute routing data between two locations",
 )
-def get_commute_route(location: str, destination: str = "") -> dict:
+def get_commute_route(location: str, destination: str = "", mode: str = "drive") -> dict:
     """Return routing data for all supported modes.
 
-    `location`    — origin (e.g. "Mumbai, India" or "Chicago, IL")
-    `destination` — explicit destination; defaults to city centre of location
+    `location`    -- origin (e.g. "Mumbai, India" or "Chicago, IL")
+    `destination` -- explicit destination; defaults to city centre of location
+    `mode`        -- primary mode: "drive" | "transit" | "bike" | "walk"
     """
     api_key = Config.TOMTOM_API_KEY
+    # Normalise mode
+    mode = mode.lower().strip() if mode else "drive"
+    if mode not in ("drive", "transit", "bike", "walk"):
+        mode = "drive"
 
     # Geocode origin
     origin = _geocode(location, api_key) if location else None
     if not origin:
-        # Generic centre-of-India fallback if geocoding fails
         origin = (20.5937, 78.9629, "India")
     orig_lat, orig_lon, orig_label = origin
 
-    # Destination: use provided string or pick a recognisable nearby point
+    # Destination: use provided string or pick a nearby point
     dest_query = destination if destination else f"{location} city centre"
     dest = _geocode(dest_query, api_key)
     if not dest:
-        # Offset ~8 km northeast as a last resort so the route is non-trivial
         dest = (orig_lat + 0.07, orig_lon + 0.06, f"Downtown {location}")
     dest_lat, dest_lon, dest_label = dest
 
-    # ── TomTom routing ─────────────────────────────────────────────────────
+    # -- TomTom routing --
     if api_key:
-        drive_data = _call_tomtom_route(orig_lat, orig_lon, dest_lat, dest_lon, "car", api_key)
+        drive_data = _call_tomtom_route(orig_lat, orig_lon, dest_lat, dest_lon, "car",        api_key)
         bike_data  = _call_tomtom_route(orig_lat, orig_lon, dest_lat, dest_lon, "bicycle",    api_key)
         walk_data  = _call_tomtom_route(orig_lat, orig_lon, dest_lat, dest_lon, "pedestrian", api_key)
 
         if drive_data:
-            delay_s  = drive_data.get("traffic_delay_s", 0)
-            alerts   = [f"Traffic delay of ~{round(delay_s/60)} min on recommended route."] \
-                       if delay_s > 300 else []
+            delay_s = drive_data.get("traffic_delay_s", 0)
+            alerts  = [f"Traffic delay of ~{round(delay_s/60)} min on recommended route."] \
+                      if delay_s > 300 else []
 
-            alternates = []
+            all_modes = {
+                "drive":   drive_data,
+                "transit": {
+                    "eta_minutes": drive_data["eta_minutes"] + 12,
+                    "distance_km": drive_data["distance_km"],
+                    "polyline":    drive_data["polyline"],
+                    "traffic_delay_s": 0,
+                },
+            }
             if bike_data:
-                alternates.append({
-                    "mode":        "bike",
-                    "eta_minutes": bike_data["eta_minutes"],
-                    "distance_km": bike_data["distance_km"],
-                    "polyline":    bike_data["polyline"],
-                })
+                all_modes["bike"] = bike_data
             if walk_data:
-                alternates.append({
-                    "mode":        "walk",
-                    "eta_minutes": walk_data["eta_minutes"],
-                    "distance_km": walk_data["distance_km"],
-                    "polyline":    walk_data["polyline"],
-                })
-            # Synthetic transit estimate (TomTom free tier lacks transit routing)
-            alternates.insert(0, {
-                "mode":        "transit",
-                "eta_minutes": drive_data["eta_minutes"] + 12,
-                "distance_km": drive_data["distance_km"],
-                "polyline":    drive_data["polyline"],   # share drive polyline as approximation
-            })
+                all_modes["walk"] = walk_data
+
+            primary_mode = mode if mode in all_modes else "drive"
+            primary_data = all_modes[primary_mode]
+
+            alternates = [
+                {
+                    "mode":        m,
+                    "eta_minutes": d["eta_minutes"],
+                    "distance_km": d["distance_km"],
+                    "polyline":    d["polyline"],
+                }
+                for m, d in all_modes.items() if m != primary_mode
+            ]
 
             return {
-                "recommended_mode": "drive",
-                "eta_minutes":      drive_data["eta_minutes"],
-                "distance_km":      drive_data["distance_km"],
+                "recommended_mode": primary_mode,
+                "eta_minutes":      primary_data["eta_minutes"],
+                "distance_km":      primary_data["distance_km"],
                 "alerts":           alerts,
                 "alternates":       alternates,
-                "polyline":         drive_data["polyline"],
+                "polyline":         primary_data["polyline"],
                 "origin":           {"lat": orig_lat, "lon": orig_lon, "label": orig_label},
                 "dest":             {"lat": dest_lat, "lon": dest_lon, "label": dest_label},
                 "source":           "tomtom",
             }
 
-    # ── Advisory fallback (no key or routing failed) ───────────────────────
+    # -- ORS fallback (no TomTom key) --
+    _ORS_PROFILES = {"bike": "cycling-regular", "walk": "foot-walking", "drive": "driving-car"}
+    ors_profile = _ORS_PROFILES.get(mode, "driving-car")
+    ors_data = _call_ors_route(orig_lat, orig_lon, dest_lat, dest_lon, ors_profile)
+    if ors_data:
+        drive_ors = _call_ors_route(orig_lat, orig_lon, dest_lat, dest_lon, "driving-car") or {}
+        eta  = ors_data["eta_minutes"]
+        dist = ors_data["distance_km"]
+        alts = []
+        if mode != "drive" and drive_ors:
+            alts.append({"mode": "drive",   "eta_minutes": drive_ors.get("eta_minutes", eta), "distance_km": drive_ors.get("distance_km", dist), "polyline": drive_ors.get("polyline", [])})
+        if mode != "transit":
+            alts.append({"mode": "transit", "eta_minutes": drive_ors.get("eta_minutes", eta + 12) + 12, "distance_km": dist, "polyline": []})
+        return {
+            "recommended_mode": mode,
+            "eta_minutes":      eta,
+            "distance_km":      dist,
+            "alerts":           [f"Leave 15-20 min early for {dest_query} traffic."],
+            "alternates":       alts,
+            "polyline":         ors_data["polyline"],
+            "origin":           {"lat": orig_lat, "lon": orig_lon, "label": orig_label},
+            "dest":             {"lat": dest_lat, "lon": dest_lon, "label": dest_label},
+            "source":           "ors",
+        }
+
+    # -- Advisory fallback --
     eta  = 35
     dist = 15.0
     return {
-        "recommended_mode": "drive",
+        "recommended_mode": mode,
         "eta_minutes":      eta,
         "distance_km":      dist,
-        "alerts":           [f"Leave 15–20 min early for {location} traffic."],
+        "alerts":           [f"Leave 15-20 min early for {location} traffic."],
         "alternates": [
             {"mode": "transit", "eta_minutes": eta + 15, "distance_km": dist, "polyline": []},
             {"mode": "bike",    "eta_minutes": eta + 30, "distance_km": dist, "polyline": []},
@@ -324,8 +356,8 @@ def get_commute_advice(location: str) -> str:
 
 
 class CommuteTool:
-    def get_commute_route(self, location: str, destination: str = "") -> dict:
-        return get_commute_route(location, destination)
+    def get_commute_route(self, location: str, destination: str = "", mode: str = "drive") -> dict:
+        return get_commute_route(location, destination, mode)
 
     # legacy shim
     def get_commute_advice(self, location: str) -> str:

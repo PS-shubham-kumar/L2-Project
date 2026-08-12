@@ -22,6 +22,24 @@ class SessionManagerTests(unittest.TestCase):
             self.assertEqual(len(payload["interactions"]), 1)
             self.assertEqual(payload["interactions"][0]["query"], "woke up in the morning")
 
+    def test_delete_session_and_clear_history(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = SessionManager(storage_dir=tmpdir)
+            sid1 = manager.start_session("u1")
+            sid2 = manager.start_session("u2")
+            self.assertEqual(len(manager.list_sessions()), 2)
+            
+            # Delete one session
+            ok = manager.delete_session(sid1)
+            self.assertTrue(ok)
+            self.assertEqual(len(manager.list_sessions()), 1)
+            self.assertEqual(manager.list_sessions()[0]["session_id"], sid2)
+            
+            # Clear all remaining history
+            ok = manager.clear_history()
+            self.assertTrue(ok)
+            self.assertEqual(len(manager.list_sessions()), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

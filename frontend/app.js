@@ -59,6 +59,12 @@ const modalBackdrop = $('modal-backdrop');
 // Toast
 const toastEl = $('toast');
 
+// Map Modal refs
+const mapModal          = $('map-modal');
+const mapModalClose     = $('map-modal-close');
+const mapModalBackdrop  = $('map-modal-backdrop');
+const modalMapEl        = $('modal-map');
+
 /* ── State ── */
 let state = {
   sessionId:   null,
@@ -104,9 +110,15 @@ modalBackdrop.addEventListener('click', e => {
 
 // Escape key
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && state.isModalOpen) {
-    e.preventDefault();
-    closeModal();
+  if (e.key === 'Escape') {
+    if (state.isModalOpen) {
+      e.preventDefault();
+      closeModal();
+    }
+    if (mapModal && !mapModal.classList.contains('hidden')) {
+      e.preventDefault();
+      closeMapModal();
+    }
   }
 });
 
@@ -188,6 +200,7 @@ function renderWeather(payload) {
   metricUvSub.textContent = 'UV Index';
 
   clearSkeleton(weatherMiniSub); clearSkeleton(weatherMiniFoot);
+  weatherMiniSub.style.color = '';
   weatherMiniSub.textContent = `${d.condition} · H ${d.high}° / L ${d.low}°`;
   weatherMiniFoot.textContent = d.uv_label || '';
 
@@ -203,6 +216,7 @@ function renderWeather(payload) {
 function renderCommute(payload) {
   const d = payload.data; if (!d) return;
   clearSkeleton(commuteSubtitle); clearSkeleton(commuteEtaBadge);
+  commuteSubtitle.style.color = '';
   const mode      = d.recommended_mode || 'drive';
   const modeLabel = d.mode_label || (mode.charAt(0).toUpperCase() + mode.slice(1));
   const eta       = d.eta_minutes || '--';
@@ -235,6 +249,7 @@ function renderCommute(payload) {
 function renderBreakfast(payload) {
   const d = payload.data; if (!d) return;
   clearSkeleton(breakfastSubtitle); clearSkeleton(breakfastTimeBadge);
+  breakfastSubtitle.style.color = '';
   breakfastSubtitle.textContent = d.recipe_name || 'Quick recipe';
   const prep = d.prep_time_minutes || 0;
   breakfastTimeBadge.textContent = `${prep} min`;
@@ -242,6 +257,7 @@ function renderBreakfast(payload) {
   // Recipe Steps mini-card
   if (recipeStepsSub) {
     clearSkeleton(recipeStepsSub);
+    recipeStepsSub.style.color = '';
     const steps = d.steps || [];
     const stepCount = steps.length;
     recipeStepsSub.textContent = stepCount
@@ -268,6 +284,7 @@ function renderNews(payload) {
   const d = payload.data; if (!d?.headlines) return;
   const headlines = d.headlines.slice(0, 5);
   clearSkeleton(newsMiniSub); clearSkeleton(newsMiniFoot);
+  newsMiniSub.style.color = '';
   newsMiniSub.textContent = headlines[0]?.title || 'No headlines';
   newsMiniFoot.textContent = `${headlines.length} loaded`;
 
@@ -552,10 +569,10 @@ form.addEventListener('submit', async e => {
   dashControls.classList.add('hidden');
   newsFeedPanel.innerHTML = '<p class="empty-state">Loading headlines…</p>';
 
-  // Reset commute subtitle to avoid stale data
-  if (commuteSubtitle) {
-    commuteSubtitle.style.color = '';
-  }
+  // Reset card colors to avoid stale error colors from a previous failed run
+  [commuteSubtitle, weatherMiniSub, newsMiniSub, breakfastSubtitle, recipeStepsSub].forEach(el => {
+    if (el) el.style.color = '';
+  });
 
   // Skeletons on cards
   [heroTemp, heroCondition, metricTemp, metricEta, metricUv].forEach(el => setSkeleton(el, true));
@@ -797,6 +814,43 @@ document.querySelectorAll('.nav-item[data-view]').forEach(btn => {
   });
 });
 
+async function deleteHistoryItem(sessionId, itemEl) {
+  if (!confirm('Are you sure you want to delete this briefing from history?')) return;
+  try {
+    const res = await fetch(`/api/history/${sessionId}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to delete');
+    
+    itemEl.style.opacity = '0';
+    itemEl.style.transform = 'scale(0.9)';
+    setTimeout(() => {
+      itemEl.remove();
+      const list = $('history-list');
+      if (!list.querySelector('.history-item')) {
+        list.innerHTML = '<p class="empty-state">Your morning briefings will show up here once you run your first query.</p>';
+      }
+    }, 200);
+    showToast('Briefing deleted from history ✓', 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function clearAllHistory() {
+  if (!confirm('Are you sure you want to clear ALL briefing history? This cannot be undone.')) return;
+  try {
+    const res = await fetch('/api/history', { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to clear history');
+    
+    const list = $('history-list');
+    list.innerHTML = '<p class="empty-state">Your morning briefings will show up here once you run your first query.</p>';
+    showToast('Briefing history cleared ✓', 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
 async function loadHistory() {
   const list = $('history-list');
   list.innerHTML = '<p class="empty-state">Loading…</p>';
@@ -812,10 +866,34 @@ async function loadHistory() {
       const item = document.createElement('div');
       item.className = 'history-item';
       item.setAttribute('role','button'); item.setAttribute('tabindex','0');
-      item.innerHTML = `<b>${escHtml(s.query||s.session_id)}</b><span>${escHtml(s.session_id)} · ${s.created_at?formatTime(s.created_at):''}</span>`;
+      item.innerHTML = `
+        <div class="history-info">
+          <b>${escHtml(s.query||s.session_id)}</b>
+          <span>${escHtml(s.session_id)} · ${s.created_at?formatTime(s.created_at):''}</span>
+        </div>
+        <button class="history-delete-btn" aria-label="Delete history item" data-id="${s.session_id}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+        </button>
+      `;
+      
+      item.addEventListener('click', e => {
+        if (e.target.closest('.history-delete-btn')) return;
+        queryInput.value = s.query || '';
+        switchView('ask');
+        form.requestSubmit();
+      });
+      
+      item.querySelector('.history-delete-btn').addEventListener('click', e => {
+        e.stopPropagation();
+        deleteHistoryItem(s.session_id, item);
+      });
+      
       list.appendChild(item);
     });
-  } catch {
+  } catch (err) {
     list.innerHTML = '<p class="empty-state">Could not load history.</p>';
   }
 }
@@ -859,3 +937,310 @@ $('settings-form')?.addEventListener('submit', async e => {
 document.querySelectorAll('.nav-item[data-view]').forEach(btn => {
   if (btn.dataset.view === 'settings') btn.addEventListener('click', loadSettings, {once: false});
 });
+
+/* ──────────────────────────────────────────────────────────────
+   COMMUTE NOW DRAWER (OLA/UBER STYLE)
+────────────────────────────────────────────────────────────── */
+const commuteDrawer     = $('commute-drawer');
+const drawerPanel       = $('drawer-panel');
+const drawerClose       = $('drawer-close');
+const drawerBackdrop    = $('drawer-backdrop');
+const drawerForm        = $('drawer-form');
+const drawerFrom        = $('drawer-from');
+const drawerTo          = $('drawer-to');
+const drawerSubmit      = $('drawer-submit');
+const drawerResults     = $('drawer-results');
+const drawerEta         = $('drawer-eta');
+const drawerDistance    = $('drawer-distance');
+const drawerSource      = $('drawer-source');
+const drawerAlerts      = $('drawer-alerts');
+
+let _drawerMap          = null;
+let _drawerRouteLayer   = null;
+let _drawerAltLayers    = [];
+let _activeCommuteMode  = 'drive';
+
+function openCommuteDrawer() {
+  if (state.intent) {
+    if (state.intent.location && state.intent.location !== 'current location') {
+      drawerFrom.value = state.intent.location;
+    }
+    if (state.intent.destination) {
+      drawerTo.value = state.intent.destination;
+    }
+  }
+  commuteDrawer.classList.remove('hidden');
+  
+  // Initialize map with a small delay so container size is ready
+  setTimeout(() => {
+    if (!_drawerMap) {
+      _drawerMap = L.map('drawer-map', {
+        zoomControl:       true,
+        attributionControl: true,
+        scrollWheelZoom:   false,
+      });
+      L.tileLayer(_TILE_URL, {
+        attribution: _TILE_ATTR,
+        maxZoom: 19,
+      }).addTo(_drawerMap);
+      _drawerMap.setView([20.5937, 78.9629], 5);
+    }
+    _drawerMap.invalidateSize();
+  }, 200);
+}
+
+function closeCommuteDrawer() {
+  commuteDrawer.classList.add('hidden');
+}
+
+// Click commute card to open
+$('commute-card')?.addEventListener('click', e => {
+  if (e.target.closest('.card-actions')) return;
+  openCommuteDrawer();
+});
+
+drawerClose?.addEventListener('click', closeCommuteDrawer);
+drawerBackdrop?.addEventListener('click', closeCommuteDrawer);
+
+// Handle mode selection buttons
+document.querySelectorAll('#drawer-modes .drawer-mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#drawer-modes .drawer-mode-btn').forEach(b => {
+      b.classList.remove('mode-active');
+      b.setAttribute('aria-checked', 'false');
+    });
+    btn.classList.add('mode-active');
+    btn.setAttribute('aria-checked', 'true');
+    _activeCommuteMode = btn.dataset.mode;
+
+    // Auto-refresh route calculation if locations are already filled
+    if (drawerFrom.value.trim() && drawerTo.value.trim()) {
+      calculateDrawerRoute();
+    }
+  });
+});
+
+async function calculateDrawerRoute() {
+  const fromVal = drawerFrom.value.trim();
+  const toVal   = drawerTo.value.trim();
+  if (!fromVal || !toVal) return;
+
+  drawerSubmit.disabled = true;
+  drawerSubmit.textContent = 'Calculating route…';
+  
+  try {
+    const res = await fetch('/api/commute', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        from: fromVal,
+        to: toVal,
+        mode: _activeCommuteMode
+      })
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error || 'Failed to fetch commute path.');
+    
+    if (payload.status === 'error') {
+      throw new Error(payload.error?.message || 'Error occurred during route calculation.');
+    }
+
+    const data = payload.data || payload;
+    
+    // Render text metrics
+    drawerEta.textContent      = `${data.eta_minutes || '--'} min`;
+    drawerDistance.textContent = `${data.distance_km || '--'} km`;
+    drawerSource.textContent   = data.source || 'advisory';
+    
+    // Render alerts
+    drawerAlerts.innerHTML = '';
+    (data.alerts || []).forEach(a => {
+      const banner = document.createElement('div');
+      banner.className = 'alert-banner';
+      banner.innerHTML = `<span>⚠</span><span>${escHtml(a)}</span>`;
+      drawerAlerts.appendChild(banner);
+    });
+
+    // Show results section
+    drawerResults.classList.remove('hidden');
+    
+    // Draw Leaflet Route Map
+    setTimeout(() => {
+      if (_drawerMap) {
+        _drawerMap.invalidateSize();
+        
+        const origin   = data.origin || {};
+        const dest     = data.dest   || {};
+        const polyline = data.polyline || [];
+        
+        // Clear previous layer
+        if (_drawerRouteLayer) {
+          _drawerRouteLayer.clearLayers();
+        } else {
+          _drawerRouteLayer = L.layerGroup().addTo(_drawerMap);
+        }
+        _drawerAltLayers.forEach(l => _drawerMap.removeLayer(l));
+        _drawerAltLayers = [];
+
+        // Draw main route polyline
+        if (polyline.length >= 2) {
+          const routeLine = L.polyline(polyline, {
+            color:     '#7260c3',
+            weight:    5,
+            opacity:   0.85,
+            lineJoin:  'round',
+          }).addTo(_drawerRouteLayer);
+          
+          _drawerMap.fitBounds(routeLine.getBounds(), { padding: [35, 35] });
+        } else {
+          _drawerMap.setView([origin.lat || 20, origin.lon || 78], 12);
+        }
+
+        // Draw pins
+        const originIcon = _ORIGIN_ICON || _makePinIcon('#7260c3');
+        const destIcon   = _DEST_ICON || _makePinIcon('#f06a9a');
+
+        if (origin.lat && origin.lon) {
+          L.marker([origin.lat, origin.lon], { icon: originIcon })
+            .bindPopup(`<b>Start</b><br>${origin.label || ''}`)
+            .addTo(_drawerRouteLayer);
+        }
+        if (dest.lat && dest.lon) {
+          L.marker([dest.lat, dest.lon], { icon: destIcon })
+            .bindPopup(`<b>Destination</b><br>${dest.label || ''}`)
+            .addTo(_drawerRouteLayer);
+        }
+      }
+    }, 200);
+    
+    showToast('Commute route updated! ✓', 'success');
+
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    drawerSubmit.disabled = false;
+    drawerSubmit.textContent = 'Get Live Route';
+  }
+}
+
+drawerForm?.addEventListener('submit', e => {
+  e.preventDefault();
+  calculateDrawerRoute();
+});
+
+/* ──────────────────────────────────────────────────────────────
+   CENTERED POPUP MAP MODAL
+   ────────────────────────────────────────────────────────────── */
+let _modalMap        = null;
+let _modalRouteLayer = null;
+let _modalAltLayers  = [];
+
+function openMapModal() {
+  const payload = state.sections['commute'];
+  if (!payload || payload.status !== 'success' || !payload.data) {
+    showToast('Run a commute briefing first.');
+    return;
+  }
+  
+  const data = payload.data;
+  const origin   = data.origin || {};
+  const dest     = data.dest   || {};
+  const polyline = data.polyline || [];
+
+  const hasCoords = (
+    typeof origin.lat === 'number' && typeof origin.lon === 'number' &&
+    typeof dest.lat   === 'number' && typeof dest.lon   === 'number'
+  );
+
+  if (!hasCoords) return;
+
+  mapModal?.classList.remove('hidden');
+
+  setTimeout(() => {
+    if (!_modalMap) {
+      _modalMap = L.map('modal-map', {
+        zoomControl:       true,
+        attributionControl: true,
+        scrollWheelZoom:   true,
+      });
+      L.tileLayer(_TILE_URL, {
+        attribution: _TILE_ATTR,
+        maxZoom: 19,
+      }).addTo(_modalMap);
+    }
+    _modalMap.invalidateSize();
+
+    // Clear previous layer
+    if (_modalRouteLayer) {
+      _modalRouteLayer.clearLayers();
+    } else {
+      _modalRouteLayer = L.layerGroup().addTo(_modalMap);
+    }
+    _modalAltLayers.forEach(l => _modalMap.removeLayer(l));
+    _modalAltLayers = [];
+
+    // Draw main route polyline
+    if (polyline.length >= 2) {
+      const routeLine = L.polyline(polyline, {
+        color:     '#7260c3',
+        weight:    5,
+        opacity:   0.85,
+        lineJoin:  'round',
+      }).addTo(_modalRouteLayer);
+      
+      _modalMap.fitBounds(routeLine.getBounds(), { padding: [40, 40] });
+    } else {
+      _modalMap.setView([origin.lat, origin.lon], 12);
+    }
+
+    // Draw alternates
+    (data.alternates || []).forEach(alt => {
+      if (!alt.polyline || alt.polyline.length < 2) return;
+      const altLine = L.polyline(alt.polyline, {
+        color:    '#b4a9dd',
+        weight:   3,
+        opacity:  0.65,
+        dashArray: '6 6',
+      });
+      altLine.bindTooltip(
+        `${alt.mode.charAt(0).toUpperCase() + alt.mode.slice(1)}: ${alt.eta_minutes} min`,
+        { sticky: true }
+      );
+      altLine.addTo(_modalMap);
+      _modalAltLayers.push(altLine);
+    });
+
+    // Draw pins
+    const originIcon = _ORIGIN_ICON || _makePinIcon('#7260c3');
+    const destIcon   = _DEST_ICON || _makePinIcon('#f06a9a');
+
+    L.marker([origin.lat, origin.lon], { icon: originIcon })
+      .bindPopup(`<b>Start</b><br>${origin.label || ''}`)
+      .addTo(_modalRouteLayer);
+
+    L.marker([dest.lat, dest.lon], { icon: destIcon })
+      .bindPopup(`<b>Destination</b><br>${dest.label || ''}`)
+      .addTo(_modalRouteLayer);
+
+  }, 200);
+}
+
+function closeMapModal() {
+  mapModal?.classList.add('hidden');
+}
+
+// Click live commute map to open centered modal (uses capture phase to bypass Leaflet's stopPropagation)
+mapEl?.addEventListener('click', e => {
+  if (e.target.closest('.leaflet-control')) return;
+  const payload = state.sections['commute'];
+  if (payload && payload.status === 'success' && payload.data) {
+    openMapModal();
+  }
+}, true);
+
+mapModalClose?.addEventListener('click', closeMapModal);
+mapModalBackdrop?.addEventListener('click', closeMapModal);
+
+// Wire up Clear History Button
+$('clear-history-btn')?.addEventListener('click', clearAllHistory);
+

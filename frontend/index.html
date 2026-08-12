@@ -430,9 +430,18 @@
 
     <!-- ══ VIEW: HISTORY ══ -->
     <div id="view-history" class="view hidden">
-      <div class="view-header">
-        <h2>Briefing History</h2>
-        <p class="view-sub">Your saved morning briefings</p>
+      <div class="view-header view-header-row">
+        <div>
+          <h2>Briefing History</h2>
+          <p class="view-sub">Your saved morning briefings</p>
+        </div>
+        <button class="ctrl-btn ctrl-btn-ghost history-clear-btn" id="clear-history-btn" aria-label="Clear all history">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px;">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+          Clear All
+        </button>
       </div>
       <div id="history-list" class="history-list">
         <p class="empty-state">Your morning briefings will show up here once you run your first query.</p>
@@ -469,6 +478,82 @@
 
   </div><!-- /main-content -->
 
+<!-- Commute Drawer (Ola/Uber Style) -->
+<div id="commute-drawer" class="drawer hidden" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+  <div class="drawer-backdrop" id="drawer-backdrop"></div>
+  <div class="drawer-panel" id="drawer-panel">
+    <div class="drawer-header">
+      <h2 id="drawer-title">Commute Now</h2>
+      <button class="drawer-close" aria-label="Close" id="drawer-close" type="button">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    
+    <div class="drawer-content">
+      <form id="drawer-form" class="drawer-form" novalidate>
+        <div class="drawer-input-group">
+          <label for="drawer-from" class="drawer-input-label">Origin Location</label>
+          <div class="drawer-input-wrapper">
+            <span class="drawer-icon">📍</span>
+            <input type="text" id="drawer-from" required placeholder="Enter pickup location (e.g. Mumbai)" aria-label="Pickup location" />
+          </div>
+        </div>
+
+        <div class="drawer-input-group">
+          <label for="drawer-to" class="drawer-input-label">Destination</label>
+          <div class="drawer-input-wrapper">
+            <span class="drawer-icon">🏁</span>
+            <input type="text" id="drawer-to" required placeholder="Enter destination (e.g. Bandra)" aria-label="Destination" />
+          </div>
+        </div>
+
+        <div class="drawer-mode-group">
+          <span class="drawer-input-label">Mode of Transportation</span>
+          <div class="drawer-modes" id="drawer-modes" role="radiogroup" aria-label="Transportation Mode">
+            <button type="button" class="drawer-mode-btn mode-active" data-mode="drive" role="radio" aria-checked="true">🚗 Drive</button>
+            <button type="button" class="drawer-mode-btn" data-mode="transit" role="radio" aria-checked="false">🚌 Transit</button>
+            <button type="button" class="drawer-mode-btn" data-mode="bike" role="radio" aria-checked="false">🚲 Bike</button>
+            <button type="button" class="drawer-mode-btn" data-mode="walk" role="radio" aria-checked="false">🚶 Walk</button>
+          </div>
+        </div>
+
+        <button type="submit" class="drawer-submit-btn" id="drawer-submit">Get Live Route</button>
+      </form>
+
+      <!-- Live Map inside the Drawer (always visible) -->
+      <div class="drawer-map-container" style="margin-top: 16px;">
+        <div id="drawer-map" style="width:100%; height:320px; border-radius:12px;"></div>
+      </div>
+
+      <!-- Results Area -->
+      <div id="drawer-results" class="drawer-results hidden">
+
+        <!-- Route Strip (Ola/Uber Style) -->
+        <div class="route-strip">
+          <div class="route-metric">
+            <span class="metric-label">ETA</span>
+            <span class="metric-val" id="drawer-eta">-- min</span>
+          </div>
+          <div class="route-metric">
+            <span class="metric-label">Distance</span>
+            <span class="metric-val" id="drawer-distance">-- km</span>
+          </div>
+          <div class="route-metric">
+            <span class="metric-label">Accuracy</span>
+            <span class="metric-val" id="drawer-source" style="font-size:14px; text-transform:uppercase;">--</span>
+          </div>
+        </div>
+
+        <div id="drawer-alerts" class="drawer-alerts"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Detail modal -->
 <div id="detail-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
   <div class="modal-backdrop" id="modal-backdrop"></div>
@@ -487,11 +572,31 @@
   </div>
 </div>
 
+<!-- Map modal (Centered map view) -->
+<div id="map-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="map-modal-title">
+  <div class="modal-backdrop" id="map-modal-backdrop"></div>
+  <div class="modal-box" id="map-modal-box" style="width: min(800px, 95%); max-height: 90vh;">
+    <div class="modal-head">
+      <h2 id="map-modal-title">Live Commute Route Map</h2>
+      <button class="modal-close" aria-label="Close" id="map-modal-close" type="button">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body" style="padding: 16px;">
+      <div id="modal-map" style="width: 100%; height: 500px; border-radius: var(--r-sm); border: 1px solid var(--border);"></div>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div id="toast" class="toast hidden" role="alert" aria-live="assertive"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV/XN/WLEo=" crossorigin=""></script>
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script src="app.js"></script>
 
 <!-- Live clock script -->
