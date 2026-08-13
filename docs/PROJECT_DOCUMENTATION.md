@@ -1,7 +1,7 @@
 # Commute Commander — Project Documentation
 
-> Last updated: 2026-08-09
-> Status: Phases 1–7 complete · Phase 8 planned
+> Last updated: 2026-08-12
+> Status: Phases 1–8 complete · Phase 9 planned
 
 ---
 
@@ -10,6 +10,8 @@
 Commute Commander is a Python application that blends natural-language understanding, specialist agents, MCP-style tool registration, and session persistence to generate a personalised morning briefing covering weather, commute, news, and breakfast.
 
 It runs as both a CLI tool and a full responsive web dashboard. The web UI is served by a pure-Python HTTP server with no framework dependencies. Sessions are stored in a WAL-mode SQLite database. Cards render progressively via Server-Sent Events as each agent completes.
+
+Since Phase 8, all briefings are generated via a **ReAct-style agentic loop** that iteratively discovers tools, calls them, observes results, runs a cross-section reflection pass, and synthesises a friendly natural-language summary.
 
 ---
 
@@ -120,6 +122,42 @@ It runs as both a CLI tool and a full responsive web dashboard. The web UI is se
 
 ---
 
+### ✅ Phase 8 — Agentic MCP Loop
+
+| Item | File | What changed |
+|---|---|---|
+| `MCPAgent` enhanced | `agents/mcp_agent.py` | `connect()` → `list_tools()` → `invoke()` pattern; health check on connect |
+| Tool discovery | `agents/orchestrator.py` | `discover_tools()` connects to all 4 MCP servers and lists available tools |
+| Agentic ReAct loop | `agents/agentic_loop.py` | Iterative loop: Perceive → Plan → Act → Observe → Decide → Reflect → Respond |
+| `OrchestratorAgent.run_agentic()` | `agents/orchestrator.py` | New method that drives the agentic loop; serialises trace, reflection, summary |
+| Reflection engine | `agents/reflection.py` | 5 deterministic rules cross-checking weather/commute/breakfast for consistency |
+| Response synthesiser | `agents/response_synthesizer.py` | Template-based NL summary referencing real data (temps, ETAs, recipe names) |
+| Webapp wired to agentic loop | `scripts/webapp.py` | `POST /api/briefing` now calls `run_agentic()`; response includes `loop_trace`, `reflection`, `summary`, `tools_discovered` |
+| Agentic loop tests | `tests/test_agentic_loop.py` | 18 tests: tool discovery, loop execution, trace structure, termination, multi-section |
+| Reflection tests | `tests/test_reflection.py` | 10 tests: all 5 rules + edge cases + extreme data scenarios |
+
+#### Acceptance Criteria (all satisfied)
+
+| # | Criterion | Status |
+|---|---|---|
+| 1 | Tools server runs and each tool returns sensible data | ✅ |
+| 2 | Agent connects to the server and can list tools | ✅ |
+| 3 | Agentic loop: agent calls a tool, observes, then decides to finish | ✅ |
+| 4 | Reflection changes or confirms at least one answer | ✅ |
+| 5 | Responses are concise, friendly, and reference fetched data | ✅ |
+
+#### Reflection Rules
+
+| Rule | Trigger | Action |
+|---|---|---|
+| Hot weather + outdoor commute | `temp ≥ 35°C` + mode is `bike`/`walk` | Switch recommendation to `drive`, add heat alert |
+| Cold weather + walking | `temp ≤ 2°C` + mode is `walk`/`bike` | Add cold weather alert |
+| High UV + outdoor commute | `uv_index ≥ 8` + mode is `bike`/`walk` | Add UV protection alert |
+| Long commute + slow breakfast | `eta ≥ 45 min` + `prep ≥ 15 min` | Add time-saving suggestion |
+| Hot weather + hot breakfast | `temp ≥ 30°C` + recipe name contains "hot" | Suggest lighter meal |
+
+---
+
 ## 3. Bug Fixes Applied
 
 | Bug | File | Fix |
@@ -135,7 +173,7 @@ It runs as both a CLI tool and a full responsive web dashboard. The web UI is se
 | Method | Path | Purpose | Status |
 |---|---|---|---|
 | `GET` | `/` | Serves `web/index.html` | ✅ |
-| `POST` | `/api/briefing` | Full briefing — `{session_id, intent, sections{}}` | ✅ |
+| `POST` | `/api/briefing` | Agentic briefing — `{session_id, intent, sections, loop_trace, reflection, summary, tools_discovered}` | ✅ |
 | `POST` | `/api/briefing/{id}/{section}/refresh` | Re-run one agent | ✅ |
 | `GET` | `/api/briefing/{id}/{section}` | Poll one section | ✅ |
 | `GET` | `/api/briefing/{id}/stream` | SSE stream — one event per agent as it completes | ✅ |
@@ -152,107 +190,142 @@ It runs as both a CLI tool and a full responsive web dashboard. The web UI is se
 ## 5. Current Project Structure
 
 ```
-commute-commander/
-├── main.py                        # CLI entry point
-├── webapp.py                      # HTTP server — static files + full JSON API
-├── run_demo.py
-├── README.md
-├── PROJECT_DOCUMENTATION.md
-├── requirements.txt
+L2-Project/
+├── src/                             # All Python source code
+│   ├── agents/
+│   │   ├── orchestrator.py          # run() · run_structured() · run_agentic() · run_section()
+│   │   ├── agentic_loop.py          # ★ Phase 8 — ReAct loop: perceive → act → observe → reflect
+│   │   ├── reflection.py            # ★ Phase 8 — 5 cross-section reflection rules
+│   │   ├── response_synthesizer.py  # ★ Phase 8 — friendly NL summary generator
+│   │   ├── mcp_agent.py             # ★ Phase 8 — connect() → list_tools() → invoke()
+│   │   ├── weather_agent.py         # run() · run_structured() — real hourly data
+│   │   ├── news_agent.py            # run() · run_structured() — real URLs
+│   │   ├── commute_agent.py         # run() · run_structured(location, destination)
+│   │   ├── breakfast_agent.py       # run() · run_structured()
+│   │   ├── tool_discovery_agent.py  # Discovers tools across all registries
+│   │   ├── router.py                # Maps section names → agent names
+│   │   └── agent_registry.py
+│   │
+│   ├── mcp_tools/
+│   │   ├── weather_tools.py         # Open-Meteo geocoding + current + hourly
+│   │   ├── news_tools.py            # NewsAPI + 3 RSS feeds, structured dicts with URLs
+│   │   ├── commute_tools.py         # TomTom Search + Routing, advisory fallback
+│   │   ├── recipe_tools.py          # MealDB API
+│   │   ├── real_mcp_server.py       # RealMCPServer — register + call tools by name
+│   │   ├── server_registry.py       # Registry of named MCP servers
+│   │   ├── tool_registry.py         # Registry of named tool callables
+│   │   ├── framework_mcp.py         # Deprecated stub (kept for compatibility)
+│   │   └── tool_schema.py           # Deprecated stub (kept for compatibility)
+│   │
+│   ├── nlp/
+│   │   └── query_parser.py          # Keyword + regex parser — no ML model
+│   │
+│   └── services/
+│       ├── db.py                    # SQLiteSessionManager — Phase 6 persistence
+│       ├── session_manager.py       # JSON-file SessionManager — kept for CLI / tests
+│       ├── settings_manager.py      # SettingsManager — Phase 7 user preferences
+│       ├── config.py                # Env-var config loader
+│       ├── mealdb.py                # TheMealDB API client
+│       ├── news_feed.py             # RSS / NewsAPI client
+│       └── open_meteo.py            # Open-Meteo API client
 │
-├── agents/
-│   ├── orchestrator.py            # run() · run_structured() · run_section()
-│   ├── weather_agent.py           # run() · run_structured() — real hourly data
-│   ├── news_agent.py              # run() · run_structured() — real URLs
-│   ├── commute_agent.py           # run() · run_structured(location, destination)
-│   ├── breakfast_agent.py         # run() · run_structured()
-│   ├── router.py                  # Maps section names → agent names
-│   └── agent_registry.py
+├── scripts/
+│   ├── webapp.py                    # HTTP server — agentic loop is the default path
+│   ├── main.py                      # CLI entry point
+│   └── run_demo.py                  # Quick demo
 │
-├── mcp_tools/
-│   ├── weather_tools.py           # Open-Meteo geocoding + current + hourly
-│   ├── news_tools.py              # NewsAPI + 3 RSS feeds, structured dicts with URLs
-│   ├── commute_tools.py           # TomTom Search + Routing, advisory fallback
-│   ├── recipe_tools.py            # MealDB API
-│   ├── framework_mcp.py           # MCPToolRegistry — decorator-based tool registration
-│   ├── real_mcp_server.py         # RealMCPServer — register + call tools by name
-│   ├── server_registry.py         # Registry of named MCP servers
-│   ├── tool_registry.py           # Registry of named tool callables
-│   └── tool_schema.py             # ToolSchema dataclass
+├── frontend/
+│   ├── index.html                   # Leaflet CDN · 3-view layout
+│   ├── styles.css                   # Token CSS · Leaflet map styles
+│   └── app.js                       # SSE streaming · Leaflet map · card renderers
 │
-├── nlp/
-│   └── query_parser.py            # Keyword + regex parser — no ML model
+├── tests/
+│   ├── test_agentic_loop.py         # ★ Phase 8 — 18 tests: discovery, loop, trace
+│   ├── test_reflection.py           # ★ Phase 8 — 10 tests: all 5 reflection rules
+│   ├── test_phase6_7.py             # SQLiteSessionManager + SettingsManager tests
+│   ├── test_query_parser.py         # NLP parser tests
+│   └── test_session_logging.py      # JSON SessionManager tests
 │
-├── services/
-│   ├── db.py                      # SQLiteSessionManager — Phase 6 persistence
-│   ├── session_manager.py         # JSON-file SessionManager — kept for CLI / tests
-│   ├── settings_manager.py        # SettingsManager — Phase 7 user preferences
-│   ├── config.py                  # Env-var config loader (OPENWEATHER / NEWSAPI / TOMTOM)
-│   ├── mealdb.py                  # TheMealDB API client
-│   ├── news_feed.py               # RSS / NewsAPI client
-│   └── open_meteo.py              # Open-Meteo API client
+├── data/
+│   ├── sessions/                    # Legacy JSON session files
+│   └── sessions.db                  # SQLite database (WAL mode)
 │
-├── sessions/
-│   └── sessions.db                # SQLite database (WAL mode)
+├── config/
+│   └── settings.json                # Default app settings
 │
-├── web/
-│   ├── index.html                 # Leaflet CDN · 3-view layout (Ask/History/Settings)
-│   ├── styles.css                 # Token CSS · Leaflet map styles
-│   └── app.js                     # SSE streaming · Leaflet map · card renderers · settings
+├── docs/
+│   ├── PROJECT_DOCUMENTATION.md
+│   ├── api-contract.md
+│   └── ui-spec.md
 │
-└── docs/
-    ├── api-contract.md
-    └── ui-spec.md
-
-tests/
-├── test_query_parser.py           # NLP parser tests
-├── test_session_logging.py        # JSON SessionManager tests
-└── test_phase6_7.py               # SQLiteSessionManager + SettingsManager tests
+├── .env                             # API keys (gitignored)
+├── conftest.py                      # pytest path fix
+└── requirements.txt
 ```
 
 ---
 
-## 6. Data Flow (current)
+## 6. Data Flow — Agentic Loop (Phase 8)
 
 ```
 User query (browser)
    ↓
 POST /api/briefing
    ↓
-OrchestratorAgent.run_structured(query, session_id)
-   ↓  ┌──────────────────────────────────────────────────────┐
-   ↓  │ QueryParser → {location, sections, ingredients, ...} │
-   ↓  └──────────────────────────────────────────────────────┘
+OrchestratorAgent.run_agentic(query, session_id)
    ↓
-Router.route(sections)
+AgenticLoop.run(query)
    ↓
-┌─────────────────────────────────────────────────────────────┐
-│ WeatherAgent.run_structured(location)                        │
-│   → WeatherTool → _geocode() → Open-Meteo current + hourly  │
-│                                                             │
-│ NewsAgent.run_structured()                                  │
-│   → NewsTool → NewsAPI | RSS (with URLs)                    │
-│                                                             │
-│ CommuteAgent.run_structured(location, destination)          │
-│   → CommuteTool → TomTom geocoding → TomTom Routing API     │
-│                   → polyline + ETA + alternates             │
-│                                                             │
-│ BreakfastAgent.run_structured(ingredients, time)            │
-│   → RecipeTool → MealDB API                                 │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ 1. PERCEIVE — QueryParser → {location, sections, ...}       │
+│ 2. DISCOVER — MCPAgent.connect() → list_tools() on each     │
+│              server (weather, news, recipe, commute)         │
+│ 3. PLAN    — Router selects sections → pending queue         │
+└──────────────────────────────────────────────────────────────┘
    ↓
-{session_id, intent, sections{weather,news,commute,breakfast}}
+┌──── AGENTIC LOOP (per section) ─────────────────────────────┐
+│ THOUGHT  → "I need weather. Server has ['get_weather']"      │
+│ ACTION   → MCPAgent.invoke("get_weather", location=...)      │
+│              → WeatherTool → Open-Meteo current + hourly     │
+│ OBSERVE  → "Got 28°C, UV 5.2, condition: Hot & Sunny"        │
+│ DECIDE   → more sections pending? → loop : finish            │
+├──────────────────────────────────────────────────────────────┤
+│ THOUGHT  → "I need news. Server has ['get_headlines']"        │
+│ ACTION   → MCPAgent.invoke("get_headlines")                   │
+│              → NewsTool → NewsAPI | RSS (with URLs)           │
+│ OBSERVE  → "Got 5 headlines"                                  │
+│ DECIDE   → more sections pending? → loop : finish            │
+├──────────────────────────────────────────────────────────────┤
+│ ... (commute, breakfast — same pattern)                       │
+└──────────────────────────────────────────────────────────────┘
    ↓
-SQLiteSessionManager.save_intent(session_id, intent)   ← SQLite
+┌──────────────────────────────────────────────────────────────┐
+│ 6. REFLECT — ReflectionEngine cross-checks all sections:     │
+│    • 38°C + bike → switch to drive + add heat alert          │
+│    • 0°C + walk → add cold weather warning                   │
+│    • UV ≥ 8 + bike → add UV protection alert                 │
+│    • 50-min commute + 20-min breakfast → suggest quicker meal│
+│    • No conflicts → confirm consistency                       │
+└──────────────────────────────────────────────────────────────┘
    ↓
-JSON response → browser (POST /api/briefing)
+┌──────────────────────────────────────────────────────────────┐
+│ 7. RESPOND — synthesize_response() generates friendly NL:    │
+│    "Good morning! It's 28°C and sunny in Chicago..."         │
+└──────────────────────────────────────────────────────────────┘
    ↓
-dispatchSection() → renders immediately-available cards
+{session_id, intent, sections, loop_trace, reflection, summary,
+ tools_discovered}   → JSON response → browser
    ↓
-EventSource /api/briefing/{id}/stream
-   ↓  (parallel agent threads emit events as they complete)
-dispatchSection() → renders remaining cards progressively
+dispatchSection() → renders cards
+   ↓
+EventSource /api/briefing/{id}/stream (SSE for parallel refresh)
 ```
+
+### Legacy Data Flow (CLI / run_structured)
+
+The original `run()` and `run_structured()` paths are fully preserved for
+CLI and backward compatibility. They bypass the agentic loop and call
+agents directly.
 
 ---
 
@@ -312,15 +385,12 @@ Stored at `commute-commander/settings.json`. Validated on write — unknown `uni
 | Breakfast `steps[]` | MealDB sometimes omits steps; fallback generates generic steps |
 | Map on mobile | Leaflet container is 160px and works but is not resizable / full-screen |
 | Dark mode | CSS token system is ready; no `prefers-color-scheme` media query yet |
+| Reflection rules | Deterministic only; an LLM-based reflection would be more flexible |
+| Loop trace in UI | `loop_trace` is returned in the API but not yet rendered in the web frontend |
 
 ---
 
 ## 11. Future Roadmap
-
-### Phase 8 — Official MCP SDK Migration
-- Replace custom `MCPToolRegistry` / `RealMCPServer` with the official MCP Python SDK
-- Register each tool server as a proper MCP-compliant server
-- Enable external orchestrator discovery of tools
 
 ### Phase 9 — Voice Interface
 - Web Speech API speech-to-text input in browser

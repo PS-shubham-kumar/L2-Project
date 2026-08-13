@@ -1,6 +1,6 @@
 # Commute Commander — API Contract
 
-Defines every HTTP endpoint, request shape, and response shape. Maps directly onto the implementation: `QueryParser` → intent, `OrchestratorAgent` → briefing envelope, specialist agents → one section each, `SQLiteSessionManager` → persistence, `SettingsManager` → user preferences.
+Defines every HTTP endpoint, request shape, and response shape. Since Phase 8, the primary briefing endpoint uses a **ReAct-style agentic loop** — the response includes the full reasoning trace, reflection results, and a natural-language summary alongside the structured section data.
 
 ---
 
@@ -24,10 +24,10 @@ Response:
   "session_id": "guest-20260809180809",
   "intent": {
     "location": "Chicago",
+    "destination": "",
     "sections": ["weather", "news", "commute", "breakfast"],
     "ingredients": ["eggs"],
-    "time_constraint": "10 minutes",
-    "travel_intent": ["leaving"]
+    "time_constraint": "10 minutes"
   },
   "sections": {
     "weather":   { "section": "weather",   "status": "success", "data": { ... } },
@@ -35,11 +35,75 @@ Response:
     "commute":   { "section": "commute",   "status": "success", "data": { ... } },
     "breakfast": { "section": "breakfast", "status": "success", "data": { ... } }
   },
-  "briefing": "## Weather\n..."
+  "briefing": "Good morning! Here's your briefing for Chicago. 🌤️ It's 28°C...",
+  "summary": "Good morning! Here's your briefing for Chicago. 🌤️ It's 28°C...",
+  "loop_trace": [
+    {
+      "step": 1,
+      "thought": "I need weather data. Server 'weather' exposes ['get_weather']. I'll call 'get_weather' with {'location': 'Chicago'}.",
+      "action": "weather.get_weather",
+      "action_args": { "location": "Chicago" },
+      "observation": "Got weather: 28.0°C, UV 5.2, condition: Hot & Sunny.",
+      "duration_ms": 1234
+    },
+    {
+      "step": 2,
+      "thought": "I need news data. Server 'news' exposes ['get_headlines']. I'll call 'get_headlines' with {}.",
+      "action": "news.get_headlines",
+      "action_args": {},
+      "observation": "Got 5 headlines.",
+      "duration_ms": 890
+    },
+    {
+      "step": 5,
+      "thought": "All requested sections fulfilled. Proceeding to reflection.",
+      "action": "finish_complete",
+      "action_args": {},
+      "observation": "Successfully gathered 4 sections: ['weather', 'news', 'commute', 'breakfast'].",
+      "duration_ms": 0
+    },
+    {
+      "step": 6,
+      "thought": "Reviewing all gathered data for cross-section consistency.",
+      "action": "reflect",
+      "action_args": {},
+      "observation": "Reflection confirmed all answers: Weather and commute mode are consistent; Breakfast choice suits the weather.",
+      "duration_ms": 0
+    },
+    {
+      "step": 7,
+      "thought": "Composing a concise, friendly summary that references fetched data.",
+      "action": "synthesize_response",
+      "action_args": {},
+      "observation": "Generated 312-character summary.",
+      "duration_ms": 0
+    }
+  ],
+  "reflection": {
+    "changes_made": [],
+    "confirmations": [
+      "Weather and commute mode are consistent",
+      "Commute time and breakfast prep are compatible",
+      "Breakfast choice suits the weather"
+    ]
+  },
+  "tools_discovered": {
+    "weather": ["get_weather"],
+    "news": ["get_headlines"],
+    "recipe": ["get_recipe"],
+    "commute": ["get_commute_route", "get_commute_advice"]
+  }
 }
 ```
 
-The `sections` object contains whichever agents completed within the 30-second hard timeout. Any section that failed returns an error envelope (see §3.5) rather than crashing the whole briefing.
+The `sections` object contains whichever agents completed within the 45-second hard timeout. Any section that failed returns an error envelope (see §3.5) rather than crashing the whole briefing.
+
+**New fields (Phase 8):**
+- `loop_trace` — full ReAct reasoning trace showing Thought → Action → Observation for each step
+- `reflection` — cross-section consistency check results (`changes_made` lists modifications; `confirmations` lists verified-consistent pairs)
+- `summary` — friendly natural-language briefing referencing real data
+- `tools_discovered` — map of server name → list of tool names discovered during the agentic loop
+- `briefing` — alias for `summary` (backward compatibility)
 
 Error (empty query):
 ```json
@@ -338,4 +402,5 @@ Response: the full updated settings object (same shape as GET).
 - All timestamps are ISO 8601 UTC; the UI localises for display
 - `session_id` from §1 is required on every subsequent call
 - All JSON responses include `Content-Type: application/json; charset=utf-8` and `Access-Control-Allow-Origin: *`
-- The 30-second hard timeout on `POST /api/briefing` is enforced via a daemon thread — if it fires, a `TimeoutError` is returned as a 500 with a user-friendly message
+- The 45-second hard timeout on `POST /api/briefing` is enforced via a daemon thread — if it fires, a `TimeoutError` is returned as a 500 with a user-friendly message
+- The agentic loop adds ~2-3 seconds of overhead vs the legacy `run_structured()` path due to sequential tool discovery + reflection pass

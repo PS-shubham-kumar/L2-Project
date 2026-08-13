@@ -11,7 +11,8 @@ A Python application that combines NLP query parsing, specialist agents, MCP-sty
 - SSE streaming — cards render progressively as each agent completes, no waiting for the slowest one
 - SQLite session persistence — WAL-mode database survives server restarts
 - Settings backend — `GET/PUT /api/settings` persists default location, units, and section preferences
-- MCP-style tool layer — custom `MCPToolRegistry` / `RealMCPServer` with decorator-based tool registration
+- ReAct Agentic Loop & Reflection — iterative tool discovery, execution, cross-section reflection (e.g. extreme heat warnings), and friendly natural-language synthesis
+- MCP-style tool layer — custom `MCPToolRegistry` / `RealMCPServer` wrapping FastMCP with decorator-based tool registration
 - Lightweight web UI served by a built-in Python HTTP server — no framework required
 
 ## Project Structure
@@ -122,6 +123,6 @@ Full briefing from New York with toast.
 | 5 — SSE Streaming | ✅ | `GET /api/briefing/{id}/stream` — cards render as each agent completes |
 | 6 — SQLite Persistence | ✅ | `SQLiteSessionManager` replaces JSON files; WAL-mode, same public API |
 | 7 — Settings Backend | ✅ | `GET/PUT /api/settings`, settings form persists to disk |
-| 8 — MCP SDK Migration | 🔲 | Replace custom registry with official MCP Python SDK |
+| 8 — Agentic MCP Loop | ✅ | ReAct loop, tool discovery, cross-section reflection pass, friendly response synthesis |
 | 9 — Voice Interface | 🔲 | Web Speech API input + TTS playback |
 | 10 — PWA / Mobile | 🔲 | Service worker, manifest, push notifications |

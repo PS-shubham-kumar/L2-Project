@@ -240,7 +240,7 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
     # ── Route handlers ───────────────────────────────────────────────────────
 
     def _handle_briefing(self) -> None:
-        """POST /api/briefing — main entry point."""
+        """POST /api/briefing — main entry point (agentic loop)."""
         try:
             body    = self._read_json_body()
             query   = str(body.get("query", "")).strip()
@@ -256,7 +256,7 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
 
             def _run() -> None:
                 try:
-                    result_box["data"] = orchestrator.run_structured(
+                    result_box["data"] = orchestrator.run_agentic(
                         query, session_id=session_id
                     )
                 except Exception as exc:
@@ -264,7 +264,7 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
 
             t = threading.Thread(target=_run, daemon=True)
             t.start()
-            t.join(timeout=30)
+            t.join(timeout=45)
 
             if error_box:
                 raise error_box[0]
@@ -273,23 +273,22 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
                     "The briefing took too long. Check your network connection and try again."
                 )
 
-            structured = result_box["data"]
-            intent = structured.get("intent", {})
-            session_manager.save_intent(session_id, intent)
+            agentic = result_box["data"]
 
             self._send_json(HTTPStatus.OK, {
-                "session_id": session_id,
-                "intent":     intent,
-                "sections":   structured.get("sections", {}),
-                "briefing":   "\n\n".join(
-                    str(s.get("data", ""))
-                    for s in structured.get("sections", {}).values()
-                    if s.get("status") == "success"
-                ),
+                "session_id":       agentic.get("session_id", session_id),
+                "intent":           agentic.get("intent", {}),
+                "sections":         agentic.get("sections", {}),
+                "briefing":         agentic.get("summary", ""),
+                "loop_trace":       agentic.get("loop_trace", []),
+                "reflection":       agentic.get("reflection", {}),
+                "summary":          agentic.get("summary", ""),
+                "tools_discovered": agentic.get("tools_discovered", {}),
             })
 
         except (ValueError, json.JSONDecodeError) as exc:
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+        except Exception as exc:
             self._send_json(
                 HTTPStatus.INTERNAL_SERVER_ERROR,
                 {"error": f"Could not create the briefing: {exc}"},

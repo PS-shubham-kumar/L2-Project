@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import List
+from typing import Dict, List
 
 from nlp.query_parser import QueryParser
+from agents.agentic_loop import AgenticLoop
 from agents.weather_agent import WeatherAgent
 from agents.news_agent import NewsAgent
 from agents.breakfast_agent import BreakfastAgent
@@ -58,36 +59,23 @@ class OrchestratorAgent:
         self.server_registry.register("recipe", self.recipe_server)
         self.server_registry.register("commute", self.commute_server)
 
+        # ── Agentic Loop ──────────────────────────────────────────────────
+        self.agentic_loop = AgenticLoop(
+            server_registry=self.server_registry,
+            parser=self.parser,
+            router=self.router,
+        )
+
     # ------------------------------------------------------------------
     # Original plain-text run — preserved so CLI and existing tests work
     # ------------------------------------------------------------------
     def run(self, query: str, session_id: str | None = None) -> str:
-        parsed = self.parser.parse(query)
-        sections = parsed["sections"]
-        location = parsed["location"]
-        destination = parsed.get("destination", "")
-        ingredients = parsed["ingredients"]
-        time_constraint = parsed["time_constraint"]
-
-        sections_output: List[str] = []
-        routed_agents = self.router.route(sections)
-
-        if "weather" in routed_agents:
-            sections_output.append(self.weather_agent.run(location))
-        if "news" in routed_agents:
-            sections_output.append(self.news_agent.run())
-        if "breakfast" in routed_agents:
-            sections_output.append(self.breakfast_agent.run(ingredients, time_constraint))
-        if "commute" in routed_agents:
-            sections_output.append(self.commute_agent.run(location))
-
-        if not sections_output:
-            return "No matching sections were found. Try a request like: weather, news, commute, or breakfast."
-
-        response = "\n\n".join(sections_output)
-        if session_id:
-            self.session_manager.log_interaction(session_id, {"query": query, "response": response})
-        return response
+        """Run query through the agentic loop and return natural language summary."""
+        result = self.run_agentic(query, session_id=session_id)
+        summary = result.get("summary", "")
+        if summary:
+            return summary
+        return "No matching sections were found. Try a request like: weather, news, commute, or breakfast."
 
     # ------------------------------------------------------------------
     # Structured run — used by the web UI for per-card JSON rendering
@@ -186,6 +174,75 @@ class OrchestratorAgent:
             )
 
         return envelope
+
+    # ------------------------------------------------------------------
+    # Tool discovery — Acceptance Criterion 2
+    # ------------------------------------------------------------------
+    def discover_tools(self) -> Dict[str, List[str]]:
+        """Connect to all MCP servers and list their available tools."""
+        return self.agentic_loop.discover_tools()
+
+    # ------------------------------------------------------------------
+    # Agentic run — Acceptance Criteria 3, 4, 5
+    # ------------------------------------------------------------------
+    def run_agentic(self, query: str, session_id: str | None = None) -> dict:
+        """Execute the full ReAct agentic loop.
+
+        Returns a dict with::
+
+            {
+                "session_id":        str,
+                "intent":            dict,
+                "sections":          dict,   # same shape as run_structured
+                "loop_trace":        list,   # thought/action/observation steps
+                "reflection":        dict,   # {changes_made, confirmations}
+                "summary":           str,    # friendly NL summary
+                "tools_discovered":  dict,   # server → [tool_names]
+            }
+        """
+        from agents.agentic_loop import AgenticResult
+
+        result: AgenticResult = self.agentic_loop.run(query, session_id=session_id or "")
+
+        # Persist intent
+        if session_id:
+            self.session_manager.save_intent(session_id, result.intent)
+            self.session_manager.log_interaction(
+                session_id,
+                {
+                    "query": query,
+                    "agentic": True,
+                    "sections_returned": list(result.sections.keys()),
+                    "reflection_changes": result.reflection.changes_made if result.reflection else [],
+                },
+            )
+
+        # Serialise the trace
+        trace_dicts = [
+            {
+                "step":        t.step,
+                "thought":     t.thought,
+                "action":      t.action,
+                "action_args": t.action_args,
+                "observation": t.observation,
+                "duration_ms": t.duration_ms,
+            }
+            for t in result.trace
+        ]
+
+        return {
+            "session_id":       result.session_id,
+            "intent":           result.intent,
+            "sections":         result.sections,
+            "loop_trace":       trace_dicts,
+            "reflection":       {
+                "changes_made":  result.reflection.changes_made if result.reflection else [],
+                "confirmations": result.reflection.confirmations if result.reflection else [],
+            },
+            "summary":          result.summary,
+            "tools_discovered": result.tools_discovered,
+            "briefing":         result.summary,  # compat with existing UI
+        }
 
     # ------------------------------------------------------------------
     # Re-run a single section with an existing intent dict
