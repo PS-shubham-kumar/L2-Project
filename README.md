@@ -1,6 +1,6 @@
 # Commute Commander
 
-A Python application that combines NLP query parsing, specialist agents, MCP-style tool servers, and session persistence to deliver a personalised morning briefing — covering weather, news, commute, and breakfast — via both a CLI and a browser-based web dashboard.
+A Python application that combines NLP query parsing, specialist agents, real MCP tool servers (built with `FastMCP`), and session persistence to deliver a personalised morning briefing — covering weather, news, commute, and breakfast — via both a CLI and a browser-based web dashboard.
 
 ## Features
 
@@ -12,8 +12,23 @@ A Python application that combines NLP query parsing, specialist agents, MCP-sty
 - SQLite session persistence — WAL-mode database survives server restarts
 - Settings backend — `GET/PUT /api/settings` persists default location, units, and section preferences
 - ReAct Agentic Loop & Reflection — iterative tool discovery, execution, cross-section reflection (e.g. extreme heat warnings), and friendly natural-language synthesis
-- MCP-style tool layer — custom `MCPToolRegistry` / `RealMCPServer` wrapping FastMCP with decorator-based tool registration
+- **MCP Tools & Server Layer** — Official **FastMCP** tools/servers (`FastMCP` from `fastmcp` SDK) wrapped by `RealMCPServer` for in-process agent execution, plus lightweight MCP-style servers (`MCPToolServer`)
 - Lightweight web UI served by a built-in Python HTTP server — no framework required
+
+## MCP Tools & Server Architecture
+
+This project uses **real Model Context Protocol (MCP) tools and servers** built with the official `fastmcp` Python SDK, alongside in-process wrappers and lightweight MCP-style servers:
+
+1. **Standard MCP Tools & FastMCP Servers**:
+   - Tools (`get_weather`, `get_headlines`, `get_route`, `get_breakfast_recipe`) are registered using standard `@mcp.tool` decorators on `FastMCP` server instances (`FastMCP("weather-server")`, etc.) in `src/mcp_tools/`.
+   - Each tool file can be executed standalone (`python src/mcp_tools/weather_tools.py`) to launch a standard FastMCP server for external MCP client connections over stdio/SSE.
+
+2. **In-Process Real MCP Server (`RealMCPServer` & `MCPAgent`)**:
+   - `RealMCPServer` (`src/mcp_tools/real_mcp_server.py`) wraps `FastMCP` servers to provide in-process tool listing (`list_tools()`), health checking (`health_check()`), and direct tool invocation (`call_tool()`).
+   - `MCPAgent` (`src/agents/mcp_agent.py`) connects to these servers in memory during the ReAct agentic loop for dynamic tool discovery and execution.
+
+3. **MCP-Style Fallback & Test Wrappers**:
+   - `MCPToolServer` (`src/mcp_tools/mcp_server.py`) and `ToolRegistry` (`src/mcp_tools/tool_registry.py`) provide lightweight, framework-free MCP-style decorator and server patterns for simple unit testing and mock implementations.
 
 ## Project Structure
 
@@ -21,7 +36,7 @@ A Python application that combines NLP query parsing, specialist agents, MCP-sty
 L2-Project/
 ├── src/                     # All Python source code
 │   ├── agents/              # Orchestrator + specialist agents
-│   ├── mcp_tools/           # MCP-style tool servers & registry
+│   ├── mcp_tools/           # FastMCP tool servers, RealMCPServer & MCP-style registry
 │   ├── nlp/                 # Keyword + regex query parser
 │   └── services/            # API clients, session manager, SQLite db, settings
 │
