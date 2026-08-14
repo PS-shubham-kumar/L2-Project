@@ -42,15 +42,15 @@ Only one view is visible at a time. View switching is client-side only (no page 
 ┌─────────────────────────────────────────────────────────────┐
 │  Sidebar  │  Topbar (eyebrow + heading + avatar)            │
 │  (purple) ├─────────────────────────────────────────────────┤
-│           │  View: Ask                                       │
+│           │  View: Ask                                      │
 │  [Ask]    │  ┌──────────────────────┐  ┌──────────────────┐ │
 │  [History]│  │  Query form          │  │  Headlines panel │ │
-│  [Settings│  │  Intent chips        │  │  Live map        │ │
+│ [Settings]│  │  Intent chips        │  │  Live map        │ │
 │  [Signout]│  │  Hero card           │  └──────────────────┘ │
-│           │  │  Action row          │                        │
-│           │  │  Mini cards row      │                        │
-│           │  │  Dash controls       │                        │
-│           │  └──────────────────────┘                        │
+│           │  │  Action row          │                       │
+│           │  │  Mini cards row      │                       │
+│           │  │  Dash controls       │                       │
+│           │  └──────────────────────┘                       │
 └─────────────────────────────────────────────────────────────┘
 ```
 

@@ -46,6 +46,7 @@ L2-Project/
 │   └── design-preferences/
 │
 ├── .env                     # API keys (gitignored — create from example below)
+├── .env.example
 ├── conftest.py              # pytest path fix
 └── requirements.txt
 ```
