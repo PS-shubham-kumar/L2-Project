@@ -49,7 +49,7 @@ orchestrator     = OrchestratorAgent(session_manager=session_manager)
 settings_manager = SettingsManager(storage_dir=str(ROOT / "config"))
 
 # ── URL patterns ────────────────────────────────────────────────────────────
-_SECTION_RE = r"(?P<section>weather|news|commute|breakfast)"
+_SECTION_RE = r"(?P<section>weather|news|commute|breakfast|itinerary)"
 _SID_RE     = r"(?P<session_id>[^/]+)"
 
 _RE_BRIEFING        = re.compile(r"^/api/briefing$")
@@ -62,6 +62,8 @@ _RE_STREAM          = re.compile(rf"^/api/briefing/{_SID_RE}/stream$")
 _RE_HISTORY_DETAIL  = re.compile(rf"^/api/history/{_SID_RE}$")
 _RE_SETTINGS        = re.compile(r"^/api/settings$")
 _RE_COMMUTE         = re.compile(r"^/api/commute$")
+_RE_ITINERARY       = re.compile(r"^/api/itinerary$")
+_RE_SHARE_EMAIL     = re.compile(r"^/api/share/email$")
 
 
 
@@ -117,6 +119,10 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
             self._handle_commute_direct()
             return
 
+        if _RE_ITINERARY.match(path):
+            self._handle_itinerary_direct()
+            return
+
         m = _RE_SECTION_REFRESH.match(path)
         if m:
             self._handle_section_refresh(m.group("session_id"), m.group("section"))
@@ -130,6 +136,10 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
         m = _RE_RERUN.match(path)
         if m:
             self._handle_rerun(m.group("session_id"))
+            return
+
+        if _RE_SHARE_EMAIL.match(path):
+            self._handle_share_email()
             return
 
         self.send_error(HTTPStatus.NOT_FOUND, "Endpoint not found")
@@ -335,6 +345,48 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
                 {"error": f"Could not calculate commute: {exc}"},
             )
 
+    def _handle_itinerary_direct(self) -> None:
+        """POST /api/itinerary — direct itinerary generation bypass."""
+        try:
+            body = self._read_json_body()
+            location = str(body.get("location", "")).strip() or str(body.get("destination", "")).strip()
+            days = int(body.get("days", 3))
+            budget = str(body.get("budget", "moderate")).strip()
+            interests = body.get("interests", ["Sightseeing", "Food", "Culture"])
+
+            if not location:
+                raise ValueError("Destination location is required.")
+
+            result_box: dict = {}
+            error_box: list = []
+
+            def _run() -> None:
+                try:
+                    result_box["data"] = orchestrator.itinerary_agent.run_structured(
+                        location, days=days, budget=budget, interests=interests
+                    )
+                except Exception as exc:
+                    error_box.append(exc)
+
+            t = threading.Thread(target=_run, daemon=True)
+            t.start()
+            t.join(timeout=35)
+
+            if error_box:
+                raise error_box[0]
+            if "data" not in result_box:
+                raise TimeoutError("Itinerary generation timed out.")
+
+            self._send_json(HTTPStatus.OK, result_box["data"])
+
+        except (ValueError, json.JSONDecodeError) as exc:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+        except Exception as exc:
+            self._send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"error": f"Could not generate itinerary: {exc}"},
+            )
+
     def _handle_section_refresh(self, session_id: str, section: str) -> None:
         """POST /api/briefing/{id}/{section}/refresh"""
         intent = _get_intent(session_id)
@@ -414,6 +466,37 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
 
         except (ValueError, json.JSONDecodeError) as exc:
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+
+    def _handle_share_email(self) -> None:
+        """POST /api/share/email — dispatch email briefing/itinerary via Gmail FastMCP tool."""
+        try:
+            body = self._read_json_body()
+            to_email = str(body.get("to_email", "")).strip() or Config.get_recipient_email()
+            subject  = str(body.get("subject", "")).strip() or "Travel Itinerary & Briefing"
+            body_html = str(body.get("body_html", "")).strip()
+            body_text = str(body.get("body_text", "")).strip()
+
+            if not to_email or "@" not in to_email:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Valid recipient email address is required (or set RECIPIENT_EMAIL in .env)."})
+                return
+
+            if not body_html and not body_text:
+                session_id = str(body.get("session_id", "")).strip()
+                intent = _get_intent(session_id)
+                loc = intent.get("location", "your destination")
+                body_html = f"<h2>Briefing & Itinerary for {loc}</h2><p>Here is your travel summary from Commute Commander.</p>"
+                body_text = f"Briefing & Itinerary for {loc}\nHere is your travel summary from Commute Commander."
+
+            from mcp_tools.email_tools import send_email_briefing
+            res = send_email_briefing(
+                to_email=to_email,
+                subject=subject,
+                body_html=body_html,
+                body_text=body_text,
+            )
+            self._send_json(HTTPStatus.OK, {"success": True, "result": res})
+        except Exception as exc:
+            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
 
     def _handle_history_list(self) -> None:
         """GET /api/history"""

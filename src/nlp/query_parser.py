@@ -26,13 +26,29 @@ class QueryParser:
                           r"\bbus\b", r"\btrain\b", r"\bbike\b", r"\bcycling\b",
                           r"\bwalk\b", r"\bwalking\b", r"\beta\b",
                           r"\bgoing to\b", r"\bheading to\b", r"\bheading out to\b", r"\bheading out\b", r"\bdrop me\b"],
-            "breakfast": [r"\bbreakfast\b", r"\bmeal\b", r"\brecipe\b", r"\beat\b", r"\bfood\b",
-                          r"\bcook\b", r"\bquick bite\b", r"\beggs?\b", r"\btoast\b",
-                          r"\boats\b", r"\bporridge\b"],
+            "breakfast": [
+                r"\bbreakfast\b", r"\blunch\b", r"\bdinner\b", r"\bsupper\b",
+                r"\bbrunch\b", r"\bsnack\b", r"\bmeal\b", r"\bmeals\b", r"\brecipe\b",
+                r"\beat\b", r"\bfood\b", r"\bcook\b", r"\bcooking\b",
+                r"\bquick bite\b", r"\bdish\b", r"\beggs?\b", r"\btoast\b",
+                r"\boats\b", r"\bporridge\b",
+            ],
+            "itinerary": [
+                r"\bitinerary\b", r"\bitineraries\b", r"\btrip\b", r"\btravel plan\b",
+                r"\bsightseeing\b", r"\bvacation\b", r"\btourist\b", r"\bplaces to visit\b",
+                r"\bday plan\b", r"\bholiday\b", r"\btour\b", r"\bvisit\b",
+                r"\bexplore\b", r"\bthings to do\b", r"\bplaces to see\b",
+                r"\bgetaway\b", r"\btravel guide\b", r"\bjourney\b",
+            ],
         }
         self.ingredient_keywords = [
             "eggs", "egg", "toast", "banana", "oat", "oats", "milk",
-            "cheese", "bread", "avocado", "spinach", "tomato",
+            "cheese", "bread", "avocado", "spinach", "tomato", "tomatoes",
+            "chicken", "salmon", "paneer", "tofu", "rice", "pasta", "beef",
+            "pork", "fish", "potato", "potatoes", "onion", "onions", "garlic",
+            "mushroom", "mushrooms", "bell pepper", "peppers", "carrot", "carrots",
+            "broccoli", "beans", "lentils", "yogurt", "butter", "lemon", "oil",
+            "shrimp", "turkey", "bacon", "sausage", "tuna",
         ]
         self.travel_words = [
             "leaving", "heading out", "going to work", "going", "leave", "out",
@@ -44,17 +60,18 @@ class QueryParser:
         location        = self._extract_location(query)
         destination     = self._extract_destination(query)
         ingredients     = self._extract_ingredients(normalized)
+        meal_type       = self._extract_meal_type(normalized)
         time_constraint = self._extract_time_constraint(normalized)
         travel_intent   = self._extract_travel_intent(normalized)
+        days            = self._extract_days(normalized)
+        budget          = self._extract_budget(normalized)
 
         # If no explicit origin location was found but destination was extracted,
-        # treat destination as the location (e.g. "heading out to Bangalore"
-        # means the user wants info ABOUT Bangalore).
+        # treat destination as the location
         if destination and (not location or location == "current location"):
             location = destination
-            destination = ""  # clear to avoid trivial self-route
+            destination = ""
 
-        # If destination matches location, clear it (degenerate route)
         if destination and location and destination.lower() == location.lower():
             destination = ""
 
@@ -63,8 +80,11 @@ class QueryParser:
             "destination":     destination,
             "sections":        sections,
             "ingredients":     ingredients,
+            "meal_type":       meal_type,
             "time_constraint": time_constraint,
             "travel_intent":   travel_intent,
+            "days":            days,
+            "budget":          budget,
             "raw_query":       query,
         }
 
@@ -74,126 +94,172 @@ class QueryParser:
             if any(re.search(pat, normalized) for pat in patterns):
                 found.append(name)
 
-        # "briefing" / "full" / "everything" → all four sections
         if not found or any(w in normalized for w in ("briefing", "full", "everything", "all")):
             if not found:
                 found = ["weather", "news", "commute", "breakfast"]
 
-        return list(dict.fromkeys(found))  # deduplicate, preserve order
+        return list(dict.fromkeys(found))
+
+    def _extract_days(self, normalized: str) -> int:
+        match = re.search(r"(\d+)\s*-?\s*days?", normalized)
+        if match:
+            return max(1, min(int(match.group(1)), 7))
+        match = re.search(r"(\d+)\s*-?\s*weeks?", normalized)
+        if match:
+            return max(1, min(int(match.group(1)) * 7, 7))
+        return 2
+
+    def _extract_budget(self, normalized: str) -> str:
+        if any(w in normalized for w in ("luxury", "premium", "high end", "expensive")):
+            return "luxury"
+        if any(w in normalized for w in ("moderate", "mid range", "mid-range", "average")):
+            return "moderate"
+        if any(w in normalized for w in ("budget", "cheap", "low cost", "affordable", "backpack")):
+            return "budget"
+        return "moderate"
 
     def _extract_destination(self, query: str) -> str:
-        """Extract the commute destination from patterns like 'to <Place>', 'heading to <Place>',
-        'going to <Place>', 'from <Origin> to <Destination>'.
-        Returns empty string if no destination is detected.
-        """
-        _dest_noise = {"work", "office", "school", "college", "home", "my", "the", "a", "an"}
+        _dest_noise = {"work", "office", "school", "college", "home", "my", "the", "a", "an", "budget", "moderate", "luxury", "cheap"}
 
-        # Pattern 1: "from <origin> to <destination>" — case-insensitive
         match = re.search(
-            r"\bfrom\s+(?:the\s+)?([a-zA-Z\s,]+?)\s+to\s+([a-zA-Z\s,]+?)(?:\s+(?:today|tomorrow|this|please|and|how|,|$)|\s*$)",
+            r"\bfrom\s+(?:the\s+)?([a-zA-Z\s,]+?)\s+to\s+([a-zA-Z\s,]+?)(?:\s+(?:today|tomorrow|this|please|and|how|for|in\s+a|with|,|$)|\s*$)",
             query, re.IGNORECASE,
         )
         if match:
             dest = match.group(2).strip().rstrip(",")
-            if dest.lower() not in _dest_noise:
-                return dest.title()
+            words = [w for w in dest.split() if w.lower() not in _dest_noise]
+            if words:
+                return " ".join(words).title()
 
-        # Pattern 2: "heading out to <Place>" / "heading to <Place>" / "going to <Place>"
         match = re.search(
-            r"\b(?:heading(?:\s+out)?|going)\s+to\s+([a-zA-Z\s,]+?)(?:\s+(?:today|tomorrow|this|please|and|how|,|$)|\s*$)",
+            r"\b(?:heading(?:\s+out)?|going)\s+to\s+([a-zA-Z\s,]+?)(?:\s+(?:today|tomorrow|this|please|and|how|for|in\s+a|with|,|$)|\s*$)",
             query, re.IGNORECASE,
         )
         if match:
             dest = match.group(1).strip().rstrip(",")
-            if dest.lower() not in _dest_noise:
-                return dest.title()
+            words = [w for w in dest.split() if w.lower() not in _dest_noise]
+            if words:
+                return " ".join(words).title()
 
-        # Pattern 3: "to <Place>"
-        match = re.search(
-            r"\bto\s+([a-zA-Z\s,]+?)(?:\s+(?:today|tomorrow|this|please|and|how|,|$)|\s*$)",
-            query, re.IGNORECASE,
-        )
-        if match:
-            dest = match.group(1).strip().rstrip(",")
-            if dest.lower() not in _dest_noise:
-                return dest.title()
-
-        # Pattern 4: "drop me at <Place>" / "drop me off at <Place>"
-        match = re.search(
-            r"\bdrop\s+(?:me\s+)?(?:off\s+)?at\s+([a-zA-Z\s,]+?)(?:\s+(?:today|tomorrow|this|and|,|$)|\s*$)",
-            query, re.IGNORECASE,
-        )
-        if match:
-            return match.group(1).strip().rstrip(",").title()
+        # If this is an itinerary query (e.g. "plan a trip to Bali"), don't treat it as a commute destination
+        if not re.search(r"\b(?:trip|vacation|itinerary|sightseeing|travel plan)\b", query, re.IGNORECASE):
+            match = re.search(
+                r"\bto\s+([a-zA-Z\s,]+?)(?:\s+(?:today|tomorrow|this|please|and|how|for|in\s+a|with|,|$)|\s*$)",
+                query, re.IGNORECASE,
+            )
+            if match:
+                dest = match.group(1).strip().rstrip(",")
+                words = [w for w in dest.split() if w.lower() not in _dest_noise]
+                if words:
+                    return " ".join(words).title()
 
         return ""
 
     def _extract_location(self, query: str) -> str:
-        """Extract origin location from 'from/in/for/at/of <City>' or context."""
         _noise = {
             "give", "get", "show", "tell", "please", "today", "tomorrow", "this",
             "weather", "news", "commute", "breakfast", "full", "quick", "briefing",
             "everything", "all", "plan", "headline", "headlines", "latest", "update",
             "updates", "traffic", "transit", "travel", "route", "drive", "driving",
-            "food", "recipe", "eat", "cook", "ingredients", "time", "day", "the", "a", "an",
-            "i", "me", "my", "our", "you", "your", "what", "is", "of", "in", "from", "at", "for", "s"
+            "food", "recipe", "eat", "cook", "ingredients", "time", "day", "days", "the", "a", "an",
+            "i", "me", "my", "our", "you", "your", "what", "is", "of", "in", "from", "at", "for", "s",
+            "trip", "vacation", "itinerary", "budget", "moderate", "luxury", "cheap"
         }
 
-        # Pattern 1: "from <origin> to <destination>" — capture origin explicitly
+        # Pattern 0: "trip to <Location>" / "itinerary for <Location>" / "vacation in <Location>"
+        match = re.search(
+            r"\b(?:trip\s+to|itinerary\s+for|vacation\s+in|travel\s+to|visit)\s+([a-zA-Z\s,]+?)(?=\s+(?:for\s+\d+|in\s+a|with|on|at|today|tomorrow|this|please|and|,)|[\s.,!?]*$)",
+            query, re.IGNORECASE,
+        )
+        if match:
+            loc = match.group(1).strip(" .,!?")
+            words = [w for w in loc.split() if w.lower() not in _noise and not re.match(r"^\d+-days?$", w.lower())]
+            if words:
+                return " ".join(words).title()
+
+        # Pattern 1: "from <origin> to <destination>"
         match = re.search(
             r"\bfrom\s+(?:the\s+)?([a-zA-Z\s,]+?)\s+to\b",
             query, re.IGNORECASE,
         )
         if match:
             loc = match.group(1).strip(" .,!?")
-            words = [w for w in loc.split() if w.lower() not in _noise]
+            words = [w for w in loc.split() if w.lower() not in _noise and not re.match(r"^\d+-days?$", w.lower())]
             if words:
                 return " ".join(words).title()
 
-        # Pattern 2: "from/in/for/at/of <Location>" — case-insensitive, stop at punctuation or noise
+        # Pattern 2: "from/in/for/at/of <Location>"
         match = re.search(
-            r"\b(?:from|in|for|at|of)\s+([a-zA-Z\s]+?)(?=[.!?]|\s+(?:to|today|tomorrow|this|give|get|show|tell|please|and|with|how|,|$))",
+            r"\b(?:from|in|for|at|of)\s+([a-zA-Z\s]+?)(?=\s+(?:to|today|tomorrow|this|give|get|show|tell|please|and|with|how|,)|[\s.,!?]*$)",
             query, re.IGNORECASE,
         )
         if match:
             loc = match.group(1).strip(" .,!?")
-            words = [w for w in loc.split() if w.lower() not in _noise]
+            words = [w for w in loc.split() if w.lower() not in _noise and not re.match(r"^\d+-days?$", w.lower())]
             if words:
                 return " ".join(words).title()
 
-        # Pattern 3: "<Location> (weather|forecast|commute|news)" e.g. "mumbai weather"
-        match = re.search(
-            r"\b([a-zA-Z\s]+?)\s+(?:weather|forecast|commute|news|traffic|travel)\b",
-            query, re.IGNORECASE,
-        )
-        if match:
-            loc = match.group(1).strip(" .,!?")
-            words = [w for w in loc.split() if w.lower() not in _noise]
-            if words:
-                return " ".join(words).title()
-
-        # Fallback: scan words for proper nouns / city names
+        # Fallback word scanner
         words = query.split()
         for i, w in enumerate(words):
             clean = w.strip('.,!?').lower()
             if (clean not in _noise and len(clean) > 2 and "'" not in clean
+                    and not re.match(r"^\d+-days?$", clean)
                     and clean not in self.ingredient_keywords
                     and clean not in self.travel_words):
                 loc = w.strip('.,!?').title()
                 if i + 1 < len(words):
                     next_w = words[i+1].strip('.,!?')
                     if (next_w.lower() not in _noise and len(next_w) > 2
+                            and not re.match(r"^\d+-days?$", next_w.lower())
                             and "'" not in next_w and next_w.lower() not in self.ingredient_keywords):
                         loc = f"{loc} {next_w.title()}"
                 return loc
 
         return "current location"
 
+    def _extract_meal_type(self, normalized: str) -> str:
+        if re.search(r"\b(?:dinner|supper|evening meal)\b", normalized):
+            return "dinner"
+        if re.search(r"\b(?:lunch|brunch|midday meal)\b", normalized):
+            return "lunch"
+        if re.search(r"\b(?:breakfast|morning meal)\b", normalized):
+            return "breakfast"
+        if re.search(r"\b(?:snack|quick bite|appetizer)\b", normalized):
+            return "snack"
+        return "meal"
+
     def _extract_ingredients(self, normalized: str) -> List[str]:
         found = []
+        non_food = {
+            "weather", "commute", "news", "briefing", "traffic", "itinerary",
+            "forecast", "headlines", "update", "temperature", "transit", "route",
+            "destination", "today", "tomorrow", "tonight", "morning", "evening",
+        }
+
+        patterns = [
+            r"(?:breakfast|lunch|dinner|supper|snack|meal|recipe|cook|cooking|dish|make|food)\s+(?:with|using|of|having)\s+([a-zA-Z\s,&\+]+?)(?:\s+(?:under|in\s+\d+|for|today|tomorrow|please|and\s+commute|and\s+weather|and\s+news)|$|\.)",
+            r"(?:cook\s+with|using|have|with)\s+([a-zA-Z\s,&\+]+?)(?:\s+(?:under|in\s+\d+|for\s+(?:breakfast|lunch|dinner|snack|meal)|today|tomorrow|please)|$|\.)",
+        ]
+        for p in patterns:
+            m = re.search(p, normalized)
+            if m:
+                raw_chunk = m.group(1)
+                parts = re.split(r",|\band\b|&|\+", raw_chunk)
+                for part in parts:
+                    cleaned = part.strip(" .,!?")
+                    cleaned = re.sub(r"^(?:some|a|an|few|my|the|fresh|leftover|quick|healthy|tasty)\s+", "", cleaned)
+                    cleaned = re.sub(r"^(?:breakfast|lunch|dinner|snack|meal|dish)\s+(?:with|using)?\s*", "", cleaned)
+                    if any(n in cleaned for n in non_food):
+                        continue
+                    if cleaned and len(cleaned) > 2 and cleaned not in ("minutes", "minute", "hours", "hour", "today", "quick", "breakfast", "lunch", "dinner", "snack", "meal", "food"):
+                        if cleaned not in found and not any(cleaned == f for f in found):
+                            found.append(cleaned)
+
         for ingredient in self.ingredient_keywords:
             if re.search(rf"\b{re.escape(ingredient)}\b", normalized):
-                found.append(ingredient)
+                if ingredient not in found and not any(ingredient in f for f in found):
+                    found.append(ingredient)
         return found
 
     def _extract_time_constraint(self, normalized: str) -> str:

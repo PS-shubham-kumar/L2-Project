@@ -20,7 +20,7 @@ A Python application that combines NLP query parsing, specialist agents, real MC
 This project uses **real Model Context Protocol (MCP) tools and servers** built with the official `fastmcp` Python SDK, alongside in-process wrappers and lightweight MCP-style servers:
 
 1. **Standard MCP Tools & FastMCP Servers**:
-   - Tools (`get_weather`, `get_headlines`, `get_route`, `get_breakfast_recipe`) are registered using standard `@mcp.tool` decorators on `FastMCP` server instances (`FastMCP("weather-server")`, etc.) in `src/mcp_tools/`.
+   - Tools (`get_weather`, `get_headlines`, `get_route`, `get_breakfast_recipe`, `get_itinerary`, `send_email_briefing`) are registered using standard `@mcp.tool` decorators on `FastMCP` server instances (`FastMCP("weather-server")`, `FastMCP("gmail-server")`, etc.) in `src/mcp_tools/`.
    - Each tool file can be executed standalone (`python src/mcp_tools/weather_tools.py`) to launch a standard FastMCP server for external MCP client connections over stdio/SSE.
 
 2. **In-Process Real MCP Server (`RealMCPServer` & `MCPAgent`)**:
@@ -114,6 +114,8 @@ The default flow uses free public APIs — no key required to get started.
 | Open-Meteo | — | No | Weather + UV + hourly forecast |
 | RSS feeds | — | No | News headlines (BBC, NDTV, NYT fallback chain) |
 | TheMealDB | — | No | Breakfast recipes |
+| NVIDIA NIM LLM | `NVIDIA_API_KEY` | Optional | Dynamic LLM tool calling, synthesis & itinerary generation |
+| Gmail MCP Tool | `GMAIL_USER` / `GMAIL_APP_PASSWORD` | Optional | FastMCP tool server for email dispatch via `@mcp.tool` |
 | OpenWeatherMap | `OPENWEATHER_API_KEY` | Optional | Richer current conditions |
 | NewsAPI | `NEWSAPI_API_KEY` | Optional | More reliable headlines with URLs |
 | TomTom | `TOMTOM_API_KEY` | Optional | Real routing + geocoding; falls back to advisory |
@@ -125,7 +127,7 @@ I'm leaving from Chicago. Give me today's weather, quick news, commute advice, a
 
 Weather and commute from London today.
 
-Full briefing from New York with toast.
+Plan a 3-day travel itinerary for Paris with sightseeing and local food, then email it to traveler@example.com.
 ```
 
 ## Implementation Phases
@@ -140,5 +142,6 @@ Full briefing from New York with toast.
 | 6 — SQLite Persistence | ✅ | `SQLiteSessionManager` replaces JSON files; WAL-mode, same public API |
 | 7 — Settings Backend | ✅ | `GET/PUT /api/settings`, settings form persists to disk |
 | 8 — Agentic MCP Loop | ✅ | ReAct loop, tool discovery, cross-section reflection pass, friendly response synthesis |
-| 9 — Voice Interface | 🔲 | Web Speech API input + TTS playback |
-| 10 — PWA / Mobile | 🔲 | Service worker, manifest, push notifications |
+| 9 — NVIDIA LLM & Gmail MCP Tool | ✅ | Dynamic LLM tool call selection (`NVIDIA_API_KEY`), dedicated Travel Itinerary section, Gmail FastMCP tool server |
+| 10 — Voice Interface | 🔲 | Web Speech API input + TTS playback |
+| 11 — PWA / Mobile | 🔲 | Service worker, manifest, push notifications |

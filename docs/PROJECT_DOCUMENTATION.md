@@ -369,10 +369,13 @@ Stored at `commute-commander/settings.json`. Validated on write — unknown `uni
 
 | Key | Used by | Required |
 |---|---|---|
+| `NVIDIA_API_KEY` | `llm_client.py` — NVIDIA NIM LLM function calling & tool decision engine | Optional (falls back to deterministic loop) |
+| `NVIDIA_MODEL` | `llm_client.py` — NVIDIA model name (default: `meta/llama-3.1-8b-instruct`) | Optional |
+| `GMAIL_USER` | `email_tools.py` — Gmail FastMCP Tool Server dispatch email | Optional |
+| `GMAIL_APP_PASSWORD` | `email_tools.py` — Gmail 16-character App Password | Optional |
 | `OPENWEATHER_API_KEY` | `weather_tools.py` — current conditions | Optional (falls back to Open-Meteo) |
 | `NEWSAPI_API_KEY` | `news_tools.py` — top headlines with URLs | Optional (falls back to RSS) |
 | `TOMTOM_API_KEY` | `commute_tools.py` — routing + geocoding | Optional (falls back to advisory) |
-| `OPENROUTESERVICE_API_KEY` | `commute_tools.py` — future alternative | Not yet used |
 
 ---
 
@@ -385,19 +388,25 @@ Stored at `commute-commander/settings.json`. Validated on write — unknown `uni
 | Breakfast `steps[]` | MealDB sometimes omits steps; fallback generates generic steps |
 | Map on mobile | Leaflet container is 160px and works but is not resizable / full-screen |
 | Dark mode | CSS token system is ready; no `prefers-color-scheme` media query yet |
-| Reflection rules | Deterministic only; an LLM-based reflection would be more flexible |
 | Loop trace in UI | `loop_trace` is returned in the API but not yet rendered in the web frontend |
 
 ---
 
-## 11. Future Roadmap
+## 11. Future Roadmap & In-Progress
 
-### Phase 9 — Voice Interface
+### Phase 9 — NVIDIA NIM LLM Engine, Travel Itinerary Planner & Gmail MCP Tool (Completed)
+- Integrate NVIDIA NIM API endpoint (`https://integrate.api.nvidia.com/v1`) with OpenAI-compatible tool calling (`llm_client.py`).
+- Enable dynamic LLM-driven travel itinerary generation and natural language synthesis.
+- Build dedicated `ItineraryAgent` and `itinerary_tools` FastMCP server for multi-day travel planning.
+- Create official **Gmail FastMCP Tool Server** (`email_tools.py`) registering `@mcp.tool` `send_email_briefing` for LLM tool invocation.
+- Add Travel Itinerary Card UI with interactive day tabs, budget breakdown, and "Send via Gmail MCP Tool" button.
+
+### Phase 10 — Voice Interface
 - Web Speech API speech-to-text input in browser
 - Text-to-speech briefing playback (Web Speech API or ElevenLabs)
 - Wire the audio play button in the sidebar
 
-### Phase 10 — Mobile / PWA
+### Phase 11 — Mobile / PWA
 - `manifest.json` + service worker for installable PWA
 - Offline fallback page
 - Push notifications for morning briefing reminders
@@ -408,11 +417,11 @@ Stored at `commute-commander/settings.json`. Validated on write — unknown `uni
 
 ```bash
 # Web dashboard
-python webapp.py
+python scripts/webapp.py
 # Open http://localhost:8000
 
 # CLI
-python main.py
+python scripts/main.py
 
 # Tests
 python -m pytest tests/

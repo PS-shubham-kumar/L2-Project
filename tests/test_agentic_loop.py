@@ -141,7 +141,7 @@ class TestAgenticLoopDirect(unittest.TestCase):
 
     def test_section_tool_map_covers_all_sections(self):
         """Every routable section should have a tool mapping."""
-        expected = {"weather", "news", "commute", "breakfast"}
+        expected = {"weather", "news", "commute", "breakfast", "itinerary", "email"}
         self.assertEqual(set(_SECTION_TOOL_MAP.keys()), expected)
 
     def test_empty_query_produces_no_sections(self):

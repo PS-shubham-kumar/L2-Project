@@ -8,11 +8,13 @@ from agents.weather_agent import WeatherAgent
 from agents.news_agent import NewsAgent
 from agents.breakfast_agent import BreakfastAgent
 from agents.commute_agent import CommuteAgent
+from agents.itinerary_agent import ItineraryAgent
 from agents.agent_registry import AgentRegistry
 from agents.router import Router
 from mcp_tools.real_mcp_server import RealMCPServer
 from mcp_tools.server_registry import ServerRegistry
 from mcp_tools.tool_registry import ToolRegistry
+from mcp_tools.email_tools import send_email_briefing
 from services.session_manager import SessionManager
 
 
@@ -24,18 +26,21 @@ class OrchestratorAgent:
         self.news_agent = NewsAgent()
         self.breakfast_agent = BreakfastAgent()
         self.commute_agent = CommuteAgent()
+        self.itinerary_agent = ItineraryAgent()
         self.router = Router()
         self.tool_registry = ToolRegistry()
         self.tool_registry.register("weather", self.weather_agent.tool)
         self.tool_registry.register("news", self.news_agent.tool)
         self.tool_registry.register("recipe", self.breakfast_agent.tool)
         self.tool_registry.register("commute", self.commute_agent.tool)
+        self.tool_registry.register("itinerary", self.itinerary_agent.tool)
 
         self.agent_registry = AgentRegistry()
         self.agent_registry.register("weather", self.weather_agent)
         self.agent_registry.register("news", self.news_agent)
         self.agent_registry.register("breakfast", self.breakfast_agent)
         self.agent_registry.register("commute", self.commute_agent)
+        self.agent_registry.register("itinerary", self.itinerary_agent)
 
         # ── MCP Server Registry ────────────────────────────────────────────
         # Each domain has its own RealMCPServer exposing the canonical tool
@@ -47,17 +52,24 @@ class OrchestratorAgent:
         self.news_server = RealMCPServer("news-server")
         self.recipe_server = RealMCPServer("recipe-server")
         self.commute_server = RealMCPServer("commute-server")
+        self.itinerary_server = RealMCPServer("itinerary-server")
+        self.gmail_server = RealMCPServer("gmail-server")
 
         self.weather_server.register_tool("get_weather", self.weather_agent.tool.get_weather)
         self.news_server.register_tool("get_headlines", self.news_agent.tool.get_headlines)
         self.recipe_server.register_tool("get_recipe", self.breakfast_agent.tool.get_recipe)
         # Register the full routing tool (not the legacy advice shim)
         self.commute_server.register_tool("get_commute_route", self.commute_agent.tool.get_commute_route)
+        from mcp_tools.itinerary_tools import get_itinerary
+        self.itinerary_server.register_tool("get_itinerary", get_itinerary)
+        self.gmail_server.register_tool("send_email_briefing", send_email_briefing)
 
         self.server_registry.register("weather", self.weather_server)
         self.server_registry.register("news", self.news_server)
         self.server_registry.register("recipe", self.recipe_server)
         self.server_registry.register("commute", self.commute_server)
+        self.server_registry.register("itinerary", self.itinerary_server)
+        self.server_registry.register("gmail", self.gmail_server)
 
         # ── Agentic Loop ──────────────────────────────────────────────────
         self.agentic_loop = AgenticLoop(
@@ -145,12 +157,29 @@ class OrchestratorAgent:
                     "error": {"code": "agent_error", "message": str(exc)},
                 }
 
-        if "breakfast" in routed_agents:
+        if "breakfast" in routed_agents or "meal" in routed_agents:
             try:
-                results["breakfast"] = self.breakfast_agent.run_structured(ingredients, time_constraint)
+                meal_type = parsed.get("meal_type", "meal")
+                results["breakfast"] = self.breakfast_agent.run_structured(
+                    ingredients, time_constraint, meal_type=meal_type
+                )
             except Exception as exc:
                 results["breakfast"] = {
                     "section": "breakfast",
+                    "status": "error",
+                    "error": {"code": "agent_error", "message": str(exc)},
+                }
+
+        if "itinerary" in routed_agents:
+            try:
+                results["itinerary"] = self.itinerary_agent.run_structured(
+                    location,
+                    days=parsed.get("days", 2),
+                    budget=parsed.get("budget", "moderate"),
+                )
+            except Exception as exc:
+                results["itinerary"] = {
+                    "section": "itinerary",
                     "status": "error",
                     "error": {"code": "agent_error", "message": str(exc)},
                 }
@@ -159,10 +188,13 @@ class OrchestratorAgent:
             "session_id": session_id or "",
             "intent": {
                 "location":        location,
-                "destination":     destination,   # ← persisted so refresh can reuse it
+                "destination":     destination,
                 "sections":        sections,
                 "ingredients":     ingredients,
+                "meal_type":       parsed.get("meal_type", "meal"),
                 "time_constraint": time_constraint,
+                "days":            parsed.get("days", 2),
+                "budget":          parsed.get("budget", "moderate"),
             },
             "sections": results,
         }
@@ -252,13 +284,26 @@ class OrchestratorAgent:
         location        = intent.get("location", "")
         destination     = intent.get("destination", "")   # ← carries through on refresh
         ingredients     = intent.get("ingredients", [])
-        time_constraint = intent.get("time_constraint", "10 min")
+        meal_type       = intent.get("meal_type", "meal")
+        time_constraint = intent.get("time_constraint", "15 min")
+
+        meal_handler = lambda: self.breakfast_agent.run_structured(
+            ingredients, time_constraint, meal_type=meal_type
+        )
 
         dispatch = {
             "weather":   lambda: self.weather_agent.run_structured(location),
             "news":      lambda: self.news_agent.run_structured(),
             "commute":   lambda: self.commute_agent.run_structured(location, destination),
-            "breakfast": lambda: self.breakfast_agent.run_structured(ingredients, time_constraint),
+            "breakfast": meal_handler,
+            "meal":      meal_handler,
+            "meals":     meal_handler,
+            "recipe":    meal_handler,
+            "itinerary": lambda: self.itinerary_agent.run_structured(
+                location,
+                days=intent.get("days", 2),
+                budget=intent.get("budget", "moderate"),
+            ),
         }
 
         handler = dispatch.get(section)

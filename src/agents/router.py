@@ -11,6 +11,13 @@ class Router:
             "news": ["news"],
             "commute": ["commute"],
             "breakfast": ["breakfast"],
+            "meal": ["breakfast"],
+            "meals": ["breakfast"],
+            "recipe": ["breakfast"],
+            "lunch": ["breakfast"],
+            "dinner": ["breakfast"],
+            "snack": ["breakfast"],
+            "itinerary": ["itinerary"],
         }
 
     def route(self, sections: List[str]) -> List[str]:

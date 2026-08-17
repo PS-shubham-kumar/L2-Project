@@ -75,15 +75,35 @@ def _commute_args(intent: dict) -> dict:
 def _recipe_args(intent: dict) -> dict:
     return {
         "ingredients": intent.get("ingredients", []),
-        "time_constraint": intent.get("time_constraint", "10 min"),
+        "time_constraint": intent.get("time_constraint", "15 min"),
+        "meal_type": intent.get("meal_type", "meal"),
+    }
+
+
+def _itinerary_args(intent: dict) -> dict:
+    return {
+        "location": intent.get("location", ""),
+        "days": intent.get("days", 2),
+        "budget": intent.get("budget", "moderate"),
+        "interests": ["Sightseeing", "Food", "Local Culture"],
+    }
+
+
+def _email_args(intent: dict) -> dict:
+    return {
+        "to_email": intent.get("to_email", "traveler@example.com"),
+        "subject": f"Travel Briefing for {intent.get('location', '')}",
+        "body_html": f"<p>Briefing for {intent.get('location', '')}</p>",
     }
 
 
 _SECTION_TOOL_MAP: Dict[str, dict] = {
-    "weather":   {"server": "weather",  "tool": "get_weather",        "args": _weather_args},
-    "news":      {"server": "news",     "tool": "get_headlines",      "args": _news_args},
-    "commute":   {"server": "commute",  "tool": "get_commute_route",  "args": _commute_args},
-    "breakfast": {"server": "recipe",   "tool": "get_recipe",         "args": _recipe_args},
+    "weather":   {"server": "weather",   "tool": "get_weather",        "args": _weather_args},
+    "news":      {"server": "news",      "tool": "get_headlines",      "args": _news_args},
+    "commute":   {"server": "commute",   "tool": "get_commute_route",  "args": _commute_args},
+    "breakfast": {"server": "recipe",    "tool": "get_recipe",         "args": _recipe_args},
+    "itinerary": {"server": "itinerary", "tool": "get_itinerary",      "args": _itinerary_args},
+    "email":     {"server": "gmail",     "tool": "send_email_briefing","args": _email_args},
 }
 
 # Maps tool outputs to the structured section format the agents produce.
@@ -204,15 +224,17 @@ def _shape_breakfast(raw: dict) -> dict:
         if isinstance(time_val, int):
             return time_val
         m = re.search(r"(\d+)", str(time_val))
-        return int(m.group(1)) if m else 10
+        return int(m.group(1)) if m else 15
 
-    name = raw.get("name", "Quick breakfast")
-    used = raw.get("ingredients", ["eggs"])
-    prep = _parse_minutes(raw.get("time", "10 min"))
+    name = raw.get("name") or raw.get("recipe_name") or "Quick meal"
+    used = raw.get("ingredients_used") or raw.get("ingredients") or ["eggs"]
+    prep = _parse_minutes(raw.get("prep_time_minutes") or raw.get("time", "15 min"))
+    cook = _parse_minutes(raw.get("cook_time_minutes", prep))
+    total = raw.get("total_time_minutes") or (prep + cook)
     steps = raw.get("steps") or [
         f"Gather your ingredients: {', '.join(str(i) for i in used)}.",
-        "Prep and measure everything before you start.",
-        f"Cook the {name} over medium heat, stirring occasionally.",
+        "Season lightly with salt, pepper, and olive oil.",
+        f"Cook the {name} over medium heat until tender and fragrant.",
         "Plate and serve immediately.",
     ]
 
@@ -220,15 +242,40 @@ def _shape_breakfast(raw: dict) -> dict:
         "section": "breakfast",
         "status": "success",
         "data": {
+            "name": name,
             "recipe_name": name,
+            "meal_type": raw.get("meal_type", "meal"),
             "prep_time_minutes": prep,
+            "cook_time_minutes": cook,
+            "total_time_minutes": total,
             "ingredients_used": used,
+            "pantry_staples": raw.get("pantry_staples", []),
             "steps": steps,
-            "alternates": [],
+            "nutrition_highlights": raw.get("nutrition_highlights", ""),
+            "chef_tip": raw.get("chef_tip", ""),
+            "alternates": raw.get("alternates", []),
             "category": raw.get("category", ""),
             "area": raw.get("area", ""),
             "thumbnail": raw.get("thumbnail", ""),
         },
+    }
+
+
+def _shape_itinerary(raw: dict) -> dict:
+    """Shape itinerary output into section format."""
+    return {
+        "section": "itinerary",
+        "status": "success",
+        "data": raw,
+    }
+
+
+def _shape_email(raw: dict) -> dict:
+    """Shape email tool output into section format."""
+    return {
+        "section": "email",
+        "status": "success",
+        "data": raw,
     }
 
 
@@ -237,6 +284,8 @@ _SECTION_SHAPERS = {
     "news": _shape_news,
     "commute": _shape_commute,
     "breakfast": _shape_breakfast,
+    "itinerary": _shape_itinerary,
+    "email": _shape_email,
 }
 
 
@@ -297,7 +346,10 @@ class AgenticLoop:
             "destination": parsed.get("destination", ""),
             "sections": parsed.get("sections", []),
             "ingredients": parsed.get("ingredients", []),
-            "time_constraint": parsed.get("time_constraint", "10 min"),
+            "meal_type": parsed.get("meal_type", "meal"),
+            "time_constraint": parsed.get("time_constraint", "15 min"),
+            "days": parsed.get("days", 2),
+            "budget": parsed.get("budget", "moderate"),
         }
 
         # Discover available tools from MCP servers
@@ -372,10 +424,18 @@ class AgenticLoop:
                         f"{shaped['data'].get('distance_km')} km."
                     )
                 elif section == "breakfast":
+                    m_type = shaped.get('data', {}).get('meal_type', 'meal')
                     obs = (
-                        f"Got recipe: {shaped['data'].get('recipe_name')} "
+                        f"Got {m_type} recipe: {shaped['data'].get('recipe_name')} "
                         f"({shaped['data'].get('prep_time_minutes')} min prep)."
                     )
+                elif section == "itinerary":
+                    loc = shaped.get('data', {}).get('location', '')
+                    days_c = shaped.get('data', {}).get('days_count', 2)
+                    obs = f"Generated {days_c}-day itinerary for {loc}."
+                elif section == "email":
+                    status = shaped.get('data', {}).get('status', 'ok')
+                    obs = f"Email tool status: {status}."
                 else:
                     obs = f"Got result for {section}."
 

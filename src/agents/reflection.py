@@ -100,43 +100,54 @@ class ReflectionEngine:
                     f"Added UV warning (index {uv}) for {mode} commute"
                 )
 
-        # ── Rule 4: Long commute + slow breakfast ─────────────────────────
+        # ── Rule 4: Long commute + slow meal prep ─────────────────────────
         if commute_data and breakfast_data:
             eta = commute_data.get("eta_minutes", 0)
             prep = breakfast_data.get("prep_time_minutes", 0)
+            m_type = breakfast_data.get("meal_type", "meal")
             if eta >= 45 and prep >= 15:
-                breakfast_section = sections.get("breakfast", {})
+                breakfast_section = sections.get("breakfast") or sections.get("meal", {})
                 data = breakfast_section.get("data", {})
                 data["reflection_note"] = (
                     f"💡 Your commute is {eta} min — consider a quicker "
-                    f"5-minute breakfast to save time."
+                    f"10-minute {m_type} to save time."
                 )
                 result.changes_made.append(
-                    f"Added time-saving note: {eta}-min commute + {prep}-min breakfast"
-                )
-            else:
-                if commute_data and breakfast_data:
-                    result.confirmations.append(
-                        "Commute time and breakfast prep are compatible"
-                    )
-
-        # ── Rule 5: Weather + breakfast pairing ───────────────────────────
-        if weather_data and breakfast_data:
-            temp = weather_data.get("temp")
-            recipe = breakfast_data.get("recipe_name", "")
-            if temp is not None and temp >= 30 and "hot" in recipe.lower():
-                breakfast_section = sections.get("breakfast", {})
-                data = breakfast_section.get("data", {})
-                data["reflection_note"] = (
-                    f"🌡️ It's {temp}°C outside — a cold or light breakfast "
-                    f"might be more refreshing."
-                )
-                result.changes_made.append(
-                    f"Suggested lighter breakfast due to {temp}°C heat"
+                    f"Added time-saving note: {eta}-min commute + {prep}-min {m_type}"
                 )
             else:
                 result.confirmations.append(
-                    "Breakfast choice suits the weather"
+                    f"Commute time and {m_type} prep are compatible"
+                )
+
+        # ── Rule 5: Weather + meal pairing ───────────────────────────
+        if weather_data and breakfast_data:
+            temp = weather_data.get("temp")
+            recipe = breakfast_data.get("recipe_name", "")
+            m_type = breakfast_data.get("meal_type", "meal")
+            if temp is not None and temp >= 30 and ("hot" in recipe.lower() or "stew" in recipe.lower() or "porridge" in recipe.lower()):
+                breakfast_section = sections.get("breakfast") or sections.get("meal", {})
+                data = breakfast_section.get("data", {})
+                data["reflection_note"] = (
+                    f"🌡️ It's {temp}°C outside — a cold or light {m_type} "
+                    f"might be more refreshing."
+                )
+                result.changes_made.append(
+                    f"Suggested lighter {m_type} due to {temp}°C heat"
+                )
+            elif temp is not None and temp <= 5 and ("salad" in recipe.lower() or "cold" in recipe.lower()):
+                breakfast_section = sections.get("breakfast") or sections.get("meal", {})
+                data = breakfast_section.get("data", {})
+                data["reflection_note"] = (
+                    f"❄️ It's {temp}°C outside — a warm, hearty {m_type} "
+                    f"would keep you energized in the cold."
+                )
+                result.changes_made.append(
+                    f"Suggested warm comfort {m_type} due to {temp}°C cold"
+                )
+            else:
+                result.confirmations.append(
+                    f"{m_type.capitalize()} choice suits the weather"
                 )
 
         # ── Fallback: confirm everything if no changes ────────────────────
@@ -165,7 +176,7 @@ class ReflectionEngine:
 
     @staticmethod
     def _extract_breakfast(sections: dict) -> dict | None:
-        b = sections.get("breakfast", {})
+        b = sections.get("breakfast") or sections.get("meal", {})
         if b.get("status") != "success":
             return None
         return b.get("data", {})

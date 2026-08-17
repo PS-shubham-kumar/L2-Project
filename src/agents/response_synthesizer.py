@@ -92,15 +92,17 @@ def _commute_segment(data: dict) -> str:
 
 
 def _breakfast_segment(data: dict) -> str:
-    """Build the breakfast portion of the summary."""
-    name = data.get("recipe_name", "")
+    """Build the meal/recipe portion of the summary."""
+    name = data.get("name") or data.get("recipe_name", "")
+    m_type = (data.get("meal_type") or "meal").lower()
     prep = data.get("prep_time_minutes")
-    ingredients = data.get("ingredients_used", [])
+    ingredients = data.get("ingredients_used") or data.get("ingredients", [])
+    chef_tip = data.get("chef_tip", "")
     reflection_note = data.get("reflection_note", "")
 
     parts = []
     if name:
-        segment = f"For breakfast, try {name}"
+        segment = f"For {m_type}, try {name}"
         if prep:
             segment += f" ({prep}-minute prep)"
         parts.append(segment)
@@ -109,14 +111,24 @@ def _breakfast_segment(data: dict) -> str:
         ing_str = ", ".join(str(i) for i in ingredients[:4])
         if len(ingredients) > 4:
             ing_str += f" and {len(ingredients) - 4} more"
-        parts.append(f"using {ing_str}")
+        parts.append(f"featuring {ing_str}")
 
     text = " — ".join(parts) + "." if parts else ""
 
     if reflection_note:
         text += f" {reflection_note}"
+    elif chef_tip and len(chef_tip) < 90:
+        text += f" Tip: {chef_tip}"
 
     return text
+
+
+def _itinerary_segment(data: dict) -> str:
+    """Build the itinerary portion of the summary."""
+    loc = data.get("location", "your destination")
+    days = data.get("days_count") or len(data.get("days", []))
+    cost = data.get("estimated_cost", "")
+    return f"Here is your {days}-day travel itinerary for {loc} ({cost})."
 
 
 def synthesize_response(
@@ -166,12 +178,28 @@ def synthesize_response(
         if seg:
             parts.append(f"🚗 {seg} ")
 
-    # Breakfast
-    b = sections.get("breakfast", {})
+    # Meal (Breakfast / Lunch / Dinner)
+    b = sections.get("breakfast") or sections.get("meal", {})
     if b.get("status") == "success":
         seg = _breakfast_segment(b["data"])
         if seg:
-            parts.append(f"🍳 {seg} ")
+            m_type = (b["data"].get("meal_type") or "meal").lower()
+            icon_map = {
+                "breakfast": "🍳",
+                "lunch": "🥗",
+                "dinner": "🍲",
+                "snack": "🥪",
+                "meal": "🍽️",
+            }
+            icon = icon_map.get(m_type, "🍽️")
+            parts.append(f"{icon} {seg} ")
+
+    # Itinerary
+    it = sections.get("itinerary", {})
+    if it.get("status") == "success":
+        seg = _itinerary_segment(it["data"])
+        if seg:
+            parts.append(f"🗺️ {seg} ")
 
     # Reflection notes
     if reflection.changes_made:
