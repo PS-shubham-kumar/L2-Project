@@ -1,224 +1,177 @@
-# Commute Commander — Complete End-to-End Architecture & Workflow Documentation
+# Commute Commander — Architecture & Execution Workflows
 
-> **Document Purpose**: Comprehensive technical reference mapping every layer of Commute Commander — from User Interfaces (CLI & Web Dashboard) through NLP Intent Parsing, the ReAct Agentic Loop, FastMCP Tool Servers, NVIDIA NIM LLM Integration, External API Fallback Chains, Deterministic Cross-Section Reflection, and SQLite Persistence.
+> **Document Summary**: In-depth architectural execution pipelines, ReAct loop state transitions, FastMCP tool discovery diagrams, multi-factor reflection workflows, and SSE streaming mechanisms.
 
 ---
 
-## 1. High-Level System Architecture Diagram
+## 1. End-to-End System Flowchart
 
 ```mermaid
-flowchart TD
-    subgraph UI_Layer ["User Interface Layer"]
-        CLI["CLI Entry Point\n(scripts/main.py)"]
-        WEB_ASK["Ask / Briefing Feed\n(frontend/index.html - #view-ask)"]
-        WEB_ITIN["Travel Itinerary Planner\n(frontend/index.html - #view-itinerary)"]
-        WEB_DRAWER["Commute Now Drawer & Map Modal"]
+graph TD
+    Client[Web Dashboard / CLI / REST Client] -->|1. Submit Query| WebApp[HTTP Server: scripts/webapp.py]
+    WebApp -->|2. Dispatch| Orchestrator[OrchestratorAgent]
+    Orchestrator -->|3. Initialize ReAct| Loop[AgenticLoop: src/agents/agentic_loop.py]
+    
+    subgraph "Step 1: Perception"
+        Loop --> Parser[QueryParser: src/nlp/query_parser.py]
+        Parser --> Intent["Extracted Intent (Location, Sections, Ingredients, Meal Type, Days, Budget)"]
     end
 
-    subgraph Web_Server ["Python Web Server (scripts/webapp.py)"]
-        HTTP["ThreadingHTTPServer\n(Pure Python / Zero Framework)"]
-        SSE["SSE Event Stream\n(GET /api/briefing/{id}/stream)"]
-        API_ITIN["Direct Itinerary Endpoint\n(POST /api/itinerary)"]
-        API_EMAIL["Gmail Dispatch Endpoint\n(POST /api/email/send)"]
+    subgraph "Step 2: Tool Discovery"
+        Loop --> Discovery[MCPAgent.connect & RealMCPServer]
+        Discovery --> ToolList["Discovered FastMCP Tools (@mcp.tool)"]
     end
 
-    subgraph Core_Orchestration ["Core Agentic Orchestrator (src/agents/)"]
-        ORCH["OrchestratorAgent\n(orchestrator.py)"]
-        NLP["QueryParser\n(nlp/query_parser.py)"]
-        ROUTER["Intent Router\n(router.py)"]
+    subgraph "Step 3-5: Execution & Observation"
+        Loop --> Action[Execute Section Tools]
+        Action --> W_MCP["weather_tools.py (@mcp.tool get_weather)"]
+        Action --> C_MCP["commute_tools.py (@mcp.tool get_commute_route)"]
+        Action --> M_MCP["recipe_tools.py (@mcp.tool get_meal_recipe)"]
+        Action --> N_MCP["news_tools.py (@mcp.tool get_headlines)"]
+        Action --> I_MCP["itinerary_tools.py (@mcp.tool get_itinerary)"]
     end
 
-    subgraph Agentic_Loop_Layer ["ReAct Agentic Loop (agentic_loop.py)"]
-        LOOP["AgenticLoop\n(Perceive → Plan → Act → Observe → Decide)"]
-        DISC["Tool Discovery\n(discover_tools)"]
-        MCP_AGENT["MCPAgent\n(mcp_agent.py)"]
-        REFL["Deterministic ReflectionEngine\n(reflection.py)"]
-        SYNTH["ResponseSynthesizer\n(response_synthesizer.py)"]
+    subgraph "Step 6: Reflection & Consistency"
+        Loop --> Engine[ReflectionEngine: src/agents/reflection.py]
+        Engine --> Rules{"Audit 5 Multi-Factor Consistency Rules"}
+        Rules --> ReflResult["Reflection Result (Changes Made + Confirmations)"]
     end
 
-    subgraph MCP_Tool_Servers ["FastMCP Tool Server Layer (src/mcp_tools/)"]
-        S_WEATHER["weather-server\n(get_weather)"]
-        S_NEWS["news-server\n(get_headlines)"]
-        S_COMMUTE["commute-server\n(get_commute_route, advice)"]
-        S_RECIPE["recipe-server\n(get_recipe)"]
-        S_ITIN["itinerary-server\n(get_itinerary)"]
-        S_EMAIL["email-server\n(send_email_briefing)"]
+    subgraph "Step 7: Response Synthesis"
+        Loop --> Synth[ResponseSynthesizer: src/agents/response_synthesizer.py]
+        Synth --> ExecutiveSummary["Natural-Language Summary (Emoji Icons & Tips)"]
     end
 
-    subgraph AI_and_External_APIs ["AI Models & External Data Providers"]
-        NVIDIA["NVIDIA NIM LLM\n(meta/llama-3.1-8b-instruct)"]
-        OWM["OpenWeatherMap / Open-Meteo"]
-        N_API["NewsAPI / RSS Feeds (BBC, NDTV, NYT)"]
-        TOMTOM["TomTom Routing, Geocoding & Nominatim"]
-        MEALDB["TheMealDB API & Recipe Engine"]
-        GMAIL["Gmail SMTP / FastMCP Protocol"]
+    subgraph "State Persistence"
+        Orchestrator --> SQLite[(SQLite DB: sessions.db WAL Mode)]
     end
 
-    subgraph Persistence ["Persistence Layer"]
-        DB[("SQLite Database WAL Mode\ndata/sessions.db")]
-        SETTINGS["User Settings\nconfig/settings.json"]
-    end
-
-    %% Flow connections
-    CLI -->|1. user query| ORCH
-    WEB_ASK -->|POST /api/briefing| HTTP
-    WEB_ITIN -->|POST /api/itinerary| API_ITIN
-    WEB_ITIN -->|POST /api/email/send| API_EMAIL
-    HTTP -->|dispatch query| ORCH
-    API_ITIN -->|generate itinerary| S_ITIN
-    API_EMAIL -->|send email| S_EMAIL
-    HTTP <-->|SSE stream| WEB_ASK
-
-    ORCH -->|parse natural query| NLP
-    ORCH -->|route sections| ROUTER
-    ORCH -->|execute loop| LOOP
-
-    LOOP -->|discover tools| DISC
-    DISC -->|handshake| MCP_AGENT
-    MCP_AGENT <-->|list_tools / invoke| S_WEATHER & S_NEWS & S_COMMUTE & S_RECIPE & S_ITIN & S_EMAIL
-
-    S_ITIN <-->|LLM prompt + structured JSON| NVIDIA
-    S_WEATHER <--> OWM
-    S_NEWS <--> N_API
-    S_COMMUTE <--> TOMTOM
-    S_RECIPE <--> MEALDB
-    S_EMAIL <--> GMAIL
-
-    LOOP -->|deterministic sanity checks| REFL
-    LOOP -->|synthesize briefing| SYNTH
-
-    ORCH <-->|save session & interactions| DB
-    HTTP <-->|GET/PUT user preferences| SETTINGS
+    Loop --> Envelope["Structured Response + SSE Stream"]
+    Envelope --> Client
 ```
 
 ---
 
-## 2. Comprehensive End-to-End Workflow Breakdown
+## 2. ReAct Agentic Loop Sequence
 
-### A. Natural Language Briefing Flow (`POST /api/briefing`)
+The `AgenticLoop` coordinates tool invocations dynamically through 7 distinct phases:
 
-1. **User Query Input**:
-   - The user inputs a query via Web Dashboard or CLI (e.g. `"Commute from Mumbai to BKC, weather, headlines, and quick breakfast"` or `"Itinerary for Srinagar for 3 days"`).
-2. **NLP Intent Parsing ([`src/nlp/query_parser.py`](file:///c:/Users/ShubhamKumar/Desktop/L2-Project/src/nlp/query_parser.py))**:
-   - Normalizes text, matches keyword patterns, and extracts entities:
-     - `location`: Origin/Current location (e.g. `"Mumbai"` or `"Srinagar"`).
-     - `destination`: Commute target if specified (e.g. `"BKC"`).
-     - `sections`: List of requested domains (`["weather", "commute", "news", "breakfast", "itinerary"]`).
-     - `days`: Duration for travel requests (e.g. `3`).
-     - `budget`: Financial preference (`"budget"`, `"moderate"`, `"luxury"`).
-3. **Agentic ReAct Loop Execution ([`src/agents/agentic_loop.py`](file:///c:/Users/ShubhamKumar/Desktop/L2-Project/src/agents/agentic_loop.py))**:
-   - Discovers active FastMCP servers and maps section targets to tool calls.
-   - Executes tools sequentially or in parallel, shaping raw tool data into standardized typed Card payloads.
-4. **Deterministic Cross-Section Reflection ([`src/agents/reflection.py`](file:///c:/Users/ShubhamKumar/Desktop/L2-Project/src/agents/reflection.py))**:
-   - Evaluates collected data across domains for safety and optimization (e.g., switches bike commute to drive in extreme heat, flags freezing temperatures, pairs light breakfast with hot weather).
-5. **Real-time SSE Streaming & Progressive UI Updates**:
-   - `webapp.py` opens an SSE stream (`/api/briefing/{id}/stream`).
-   - Cards pop in dynamically as each specialist agent completes its task.
-   - `app.js` updates metrics, graphs, and the dynamic commute map without full-page reloads.
+```mermaid
+sequenceDiagram
+    autonumber
+    participant UI as Client / Web Dashboard
+    participant Orch as OrchestratorAgent
+    participant Loop as AgenticLoop
+    participant Parser as QueryParser
+    participant MCP as RealMCPServer / FastMCP
+    participant Refl as ReflectionEngine
+    participant Synth as ResponseSynthesizer
+    participant DB as SQLiteSessionManager
 
----
-
-### B. Travel Itinerary Planner Workflow (`POST /api/itinerary` & `#view-itinerary`)
-
-1. **Dedicated View Interaction**:
-   - User switches to the Itinerary Planner via the left sidebar (`view-itinerary`).
-   - The user can click preset destination chips (`🏔️ Srinagar`, `🏖️ Bali`, `⛩️ Tokyo`, `🌴 Goa`, `🗼 Paris`, `🏛️ Rome`, `🕌 Dubai`, `🗽 New York`) or type any global destination.
-   - Selects duration pills (`1D`–`7D`) and budget level (`🎒 Budget`, `⚖️ Moderate`, `👑 Luxury`).
-2. **Direct API Dispatch**:
-   - `frontend/app.js` displays an immediate animated skeleton card.
-   - Sends payload `{ location, days, budget }` directly to `POST /api/itinerary` (with automatic fallback to `/api/briefing`).
-3. **NVIDIA NIM LLM Reasoning ([`src/mcp_tools/itinerary_tools.py`](file:///c:/Users/ShubhamKumar/Desktop/L2-Project/src/mcp_tools/itinerary_tools.py))**:
-   - `LLMClient` sends a structured prompt to NVIDIA NIM (`meta/llama-3.1-8b-instruct`).
-   - Applies regex cleanup to strip markdown fences and sanitize trailing commas before JSON parsing.
-   - Generates structured day-by-day itineraries with themes, morning/afternoon/evening activities, landmark names, authentic dining spots, and local travel tips.
-4. **Interactive UI Rendering & Actions**:
-   - **Native Block Scrolling**: `#view-itinerary` uses `display: block !important; overflow-y: auto !important; height: calc(100dvh - 65px);` to ensure multi-day cards scroll smoothly.
-   - **Interactive Day Filter Tabs**: Filter between `[✨ All Days]` and individual `[Day 1]`...`[Day N]` tabs.
-   - **Copy to Clipboard**: `copyItineraryText()` copies a formatted markdown schedule to clipboard.
-   - **Gmail FastMCP Dispatch**: Opens modal to send the itinerary via authenticated email tool.
-
----
-
-### C. Dynamic Live Commute Map Architecture
-
-1. **Reset & Clean State Across Queries**:
-   - Upon submitting any new query, `resetCommuteMap()` clears `_routeLayer` and `_altLayers`, hides badges, and hides `#commute-map` (`class="commute-map hidden"`).
-   - If the query does **not** contain a commute section (e.g. pure itinerary or weather), `#commute-map` remains hidden, displaying a clean text placeholder (*"No commute route in this query"*), preventing stale map tiles or markers from lingering.
-2. **Live Routing & Polyline Fitting**:
-   - When real route coordinates arrive, `renderCommuteMap(data)` unhides `#commute-map`, initializes Leaflet 1.9.4, adds start and destination SVG markers, draws the main purple polyline with dashed alternate routes, fits bounds with padding, and displays the `Live · TomTom` / `Live · ORS` / `Advisory` source badge.
-3. **Commute Drawer & Main Sidebar Synchronization**:
-   - Route calculations made inside the **Commute Now** drawer (`calculateDrawerRoute()`) automatically synchronize state and update the main live map widget in the right sidebar.
+    UI->>Orch: POST /api/briefing {query, user_id}
+    Orch->>DB: start_session(user_id) -> session_id
+    Orch->>Loop: run(query, session_id)
+    
+    Note over Loop,Parser: Phase 1: Perceive
+    Loop->>Parser: parse(query)
+    Parser-->>Loop: Intent {location, destination, sections, ingredients, meal_type, ...}
+    
+    Note over Loop,MCP: Phase 2: Tool Discovery
+    Loop->>MCP: list_tools() across all servers
+    MCP-->>Loop: {weather: [get_weather], recipe: [get_meal_recipe], ...}
+    
+    Note over Loop,MCP: Phase 3-5: Plan, Act & Observe
+    loop For each section in intent.sections
+        Loop->>Loop: Generate ReAct Thought
+        Loop->>MCP: Invoke tool with structured parameters
+        MCP-->>Loop: Raw observation payload
+        Loop->>Loop: Shape domain card data & record duration_ms
+    end
+    
+    Note over Loop,Refl: Phase 6: Cross-Domain Reflection
+    Loop->>Refl: reflect(sections, intent)
+    Refl->>Refl: Apply 5 consistency rules (Heat, Cold, UV, Commute vs Prep, Weather vs Meal)
+    Refl-->>Loop: ReflectionResult {changes_made, confirmations}
+    
+    Note over Loop,Synth: Phase 7: Synthesis
+    Loop->>Synth: synthesize_response(sections, intent, reflection)
+    Synth-->>Loop: Concise, natural language executive briefing
+    
+    Loop->>DB: save_briefing(session_id, sections) & log_interaction()
+    Loop-->>Orch: Complete AgenticResult
+    Orch-->>UI: Full JSON Response Envelope
+```
 
 ---
 
-## 3. FastMCP Tools & Specialist Agents Matrix
+## 3. Dynamic Meals Workflow (Breakfast, Lunch, Dinner, Snack)
 
-| FastMCP Server | Exposed Tool Functions | Specialist Agent | Data Providers & Cascade Chain |
-|---|---|---|---|
-| **`weather-server`** | `get_weather(location)` | `WeatherAgent` | **OpenWeatherMap** $\rightarrow$ **Open-Meteo** (Current + Hourly) $\rightarrow$ Heuristic 5-point curve |
-| **`news-server`** | `get_headlines(category)` | `NewsAgent` | **NewsAPI** $\rightarrow$ **BBC RSS** $\rightarrow$ **NDTV RSS** $\rightarrow$ **NYT RSS** |
-| **`commute-server`** | `get_commute_route(from, to, mode)`<br>`get_commute_advice(location)` | `CommuteAgent` | **TomTom Routing & Geocoding** $\rightarrow$ **OSM Nominatim** $\rightarrow$ **Open-Meteo Geocode** $\rightarrow$ **ORS** $\rightarrow$ Synthetic Advisory |
-| **`recipe-server`** | `get_recipe(ingredients, time)` | `BreakfastAgent` | **TheMealDB API** $\rightarrow$ Scrambled Eggs & Toast Fallback |
-| **`itinerary-server`** | `get_itinerary(location, days, budget)` | `ItineraryAgent` | **NVIDIA NIM LLM (`meta/llama-3.1-8b-instruct`)** $\rightarrow$ Rich Knowledge Base Engine |
-| **`email-server`** | `send_email_briefing(to, subject, body)` | `EmailAgent` | **Gmail SMTP / FastMCP Protocol** |
+```mermaid
+graph TD
+    Query["User Query: 'Quick lunch with chicken and spinach under 15 min'"] --> Parse["QueryParser: meal_type='lunch', ingredients=['chicken', 'spinach'], time='15 min'"]
+    Parse --> Dispatch["MealAgent / Orchestrator"]
+    Dispatch --> ToolCall["FastMCP Tool: get_meal_recipe()"]
+    
+    subgraph "Creative LLM Generation Pipeline"
+        ToolCall --> LLM["LLMClient (NVIDIA NIM / Groq / OpenAI)"]
+        LLM --> Prompt["Prompt: Feature chicken & spinach prominently. Add minimal pantry essentials only. Provide chef_tip & nutrition_highlights."]
+        LLM --> Temp["Temperature ~0.75 (Ensures variety on identical ingredients)"]
+        Temp --> Output["JSON Recipe: Name, Steps, Times, Staples, Highlights, Tip"]
+    end
+    
+    subgraph "Fallback Resilience"
+        ToolCall -.->|If Offline / No Key| Fallback["Generative Chef Engine (10+ Cuisines & Pantry Isolator)"]
+    end
+
+    Output --> SectionShape["Shape 'breakfast' / 'meal' Section Data"]
+    Fallback --> SectionShape
+    SectionShape --> ReflectionPass["ReflectionEngine: Check Meal Prep Time vs Commute ETA & Weather Temp"]
+    ReflectionPass --> CardRender["Render Dynamic UI Card (🥗 Icon, Badges, Modal)"]
+```
 
 ---
 
-## 4. Deterministic Cross-Section Reflection Rules
+## 4. Multi-Day Travel Itinerary & FastMCP Email Workflow
 
-The Reflection Engine ([`src/agents/reflection.py`](file:///c:/Users/ShubhamKumar/Desktop/L2-Project/src/agents/reflection.py)) evaluates cross-domain consistency in $<1\text{ ms}$ with deterministic logic:
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Traveler as Traveler
+    participant UI as Web Dashboard
+    participant API as scripts/webapp.py
+    participant Agent as ItineraryAgent
+    participant Tool as itinerary_tools.py (FastMCP)
+    participant Gmail as email_tools.py (FastMCP)
+    participant SMTP as Google SMTP (smtp.gmail.com:587)
 
-| # | Rule Name | Trigger Condition | System Action / Mutation |
-|---|---|---|---|
-| **1** | **Extreme Heat + Outdoor Commute** | `temp ≥ 35°C` & mode in `("bike", "walk")` | Switched recommendation to `drive`, prepends alert: *"⚠️ Extreme heat (38°C) — switched recommendation from bike to drive for safety."* |
-| **2** | **Freezing Weather + Walking** | `temp ≤ 2°C` & mode in `("walk", "bike")` | Adds alert: *"🥶 Freezing conditions (0°C) — bundle up warmly for walking, or consider driving."* |
-| **3** | **High UV Protection Warning** | `uv_index ≥ 8` & mode in `("bike", "walk")` | Adds alert: *"☀️ UV index is very high (9.2) — wear sunscreen and a hat for your bike commute."* |
-| **4** | **Long Commute + Slow Breakfast** | `eta ≥ 45 min` & `prep ≥ 15 min` | Attaches `reflection_note`: *"💡 Your commute is 50 min — consider a quicker 5-minute breakfast to save time."* |
-| **5** | **Hot Weather + Hot Meal Pairing** | `temp ≥ 30°C` & recipe has `"hot"` | Attaches `reflection_note`: *"🌡️ It's 32°C outside — a cold or light breakfast might be more refreshing."* |
+    Traveler->>UI: Enter destination: "Tokyo", Days: 3, Budget: "Moderate"
+    UI->>API: POST /api/itinerary
+    API->>Agent: run_structured("Tokyo", days=3, budget="moderate")
+    Agent->>Tool: get_itinerary("Tokyo", 3, "moderate", interests)
+    Tool-->>Agent: Day-by-day morning, afternoon, evening schedule + dining
+    Agent-->>API: Structured Itinerary JSON
+    API-->>UI: Render Itinerary Card & Day Tabs
+    
+    Traveler->>UI: Click "✉️ Send via Gmail MCP Tool"
+    UI->>UI: Pre-populate RECIPIENT_EMAIL from settings / .env
+    Traveler->>UI: Confirm & Click "Send Email"
+    UI->>API: POST /api/share/email {to_email, subject, body_html}
+    API->>Gmail: send_itinerary_email(to_email, location, summary)
+    Gmail->>SMTP: Connect TLS 587 -> Authenticate GMAIL_APP_PASSWORD -> Send MIME HTML
+    SMTP-->>Gmail: 250 OK Message Accepted
+    Gmail-->>API: {status: "sent", delivered: true, message_id: "..."}
+    API-->>UI: {success: true}
+    UI->>Traveler: Toast: "Email sent via Gmail FastMCP Tool! ✉️"
+```
 
 ---
 
-## 5. Web API Endpoints Reference
+## 5. Fault Tolerance & Multi-Layer Fallback Architecture
 
-| HTTP Method | Route | Description |
+| Failure Scenario | Immediate Fallback Mechanism | Impact on User Experience |
 |---|---|---|
-| `POST` | `/api/briefing` | Orchestrates complete briefing via ReAct Agentic Loop, returns structured JSON. |
-| `GET` | `/api/briefing/{id}/stream` | Server-Sent Events (SSE) stream emitting progressive card updates in real-time. |
-| `POST` | `/api/briefing/{id}/{section}/refresh` | Refreshes a single section without re-running the full briefing. |
-| `POST` | `/api/briefing/{id}/rerun` | Re-executes all sections using the stored session intent. |
-| `POST` | `/api/briefing/{id}/save` | Pins and saves briefing to SQLite database. |
-| `PATCH` | `/api/briefing/{id}/intent` | Updates and merges intent properties (e.g. location, budget, sections). |
-| `POST` | `/api/itinerary` | Direct dedicated endpoint for instant multi-day travel itinerary generation. |
-| `POST` | `/api/email/send` | Dispatches briefing or itinerary to recipient email via FastMCP Gmail tool. |
-| `GET` | `/api/history` | Fetches the list of saved/recent morning briefing sessions. |
-| `GET` | `/api/history/{id}` | Fetches full session interaction JSON for a specific session. |
-| `DELETE` | `/api/history/{id}` | Deletes a session from SQLite database. |
-| `GET` | `/api/settings` | Returns user preferences from `config/settings.json`. |
-| `PUT` | `/api/settings` | Validates and updates user settings (units, default location, default sections). |
-
----
-
-## 6. Persistence & Database Schema (`data/sessions.db`)
-
-SQLite configured in **Write-Ahead Logging (WAL)** mode for concurrent multi-threaded read/write safety:
-
-```sql
--- Sessions table
-CREATE TABLE sessions (
-    session_id    TEXT PRIMARY KEY,       -- e.g. "guest-20260817180000"
-    user_id       TEXT NOT NULL,          -- e.g. "shubh" or "guest"
-    created_at    TEXT NOT NULL,          -- ISO 8601 UTC timestamp
-    saved         INTEGER NOT NULL,       -- 0 = temporary, 1 = pinned/saved
-    saved_at      TEXT,                   -- ISO 8601 UTC timestamp when pinned
-    intent        TEXT,                   -- JSON blob: {location, sections, days, budget, ...}
-    last_sections TEXT                    -- JSON blob: complete rendered section card payloads
-);
-
--- Interactions table
-CREATE TABLE interactions (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id    TEXT NOT NULL,
-    data          TEXT NOT NULL,          -- JSON blob: query, loop_trace, reflection metadata
-    timestamp     TEXT NOT NULL           -- ISO 8601 UTC timestamp
-);
-```
+| **No LLM API Key or LLM Service Downtime** | FastMCP recipe & itinerary tools activate the deterministic Generative Chef Engine and Curated City Itinerary Engine. | Zero downtime; structured recipe and day-by-day itineraries are generated instantly. |
+| **TomTom API Rate-Limit or Key Missing** | OpenRouteService API is queried; if unavailable, the Advisory Commute Engine calculates distance-based synthetic ETAs. | Route recommendations, ETAs, and alternate comparisons remain 100% available. |
+| **NewsAPI Endpoint Failure** | Multi-feed RSS parser executes fallback chain across BBC, NDTV, and NYT feeds. | Live headlines with publisher attribution and clickable URLs are delivered seamlessly. |
+| **Gmail Credentials Missing in `.env`** | Gmail FastMCP tool returns simulated delivery status with detailed confirmation. | System does not crash; UI informs user that credentials need to be set in `.env`. |
+| **Individual Agent Timeout** | 45-second per-agent timeout isolates failure to that section's card error envelope. | Other cards render normally; overall briefing succeeds. |

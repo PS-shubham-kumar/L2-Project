@@ -1,374 +1,329 @@
-# Commute Commander — API Contract
+# Commute Commander — API Contract Specification
 
-Defines every HTTP endpoint, request shape, and response shape. Since Phase 8, the primary briefing endpoint uses a **ReAct-style agentic loop** — the response includes the full reasoning trace, reflection results, and a natural-language summary alongside the structured section data.
+> **Specification Version**: 2.2  
+> **Protocol Support**: HTTP/1.1 REST, Server-Sent Events (SSE), FastMCP In-Process Protocol  
+> **Data Encoding**: JSON (`application/json`), SSE (`text/event-stream`)
 
 ---
 
-## 1. Submit Query
+## 1. Overview & Base Conventions
 
-**`POST /api/briefing`**
+All API routes are served relative to `http://localhost:8000`. Responses use standard HTTP status codes.
 
-Request:
+### Error Envelope Format
+When an API error occurs, responses return an error JSON object with an HTTP error code (e.g. 400, 404, 500):
 ```json
 {
-  "query": "I'm leaving from Chicago. Give me weather, news, commute, and a 10-min breakfast with eggs.",
+  "error": {
+    "code": "invalid_request",
+    "message": "Detailed description of the validation or operational error."
+  }
+}
+```
+
+---
+
+## 2. Primary Briefing Endpoint
+
+### `POST /api/briefing`
+Executes the ReAct Agentic Loop, discovers tools, generates section payloads, performs cross-domain reflection, and returns a synthesized summary.
+
+#### Request Headers:
+`Content-Type: application/json`
+
+#### Request Body:
+```json
+{
+  "query": "I'm leaving from Chicago to Downtown. Give me weather, commute, top news, and a 15-minute lunch with chicken and spinach.",
   "user_id": "guest"
 }
 ```
 
-`user_id` is optional — defaults to `"guest"`. The `query` field is free-form natural language; the `QueryParser` extracts location, sections, ingredients, and time constraint automatically.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `query` | `string` | **Yes** | Natural language briefing or itinerary request. |
+| `user_id` | `string` | No | Identifier for the user session (defaults to `"guest"`). |
 
-Response:
+#### Response (200 OK):
 ```json
 {
-  "session_id": "guest-20260809180809",
+  "session_id": "guest-20260817234500",
   "intent": {
     "location": "Chicago",
-    "destination": "",
-    "sections": ["weather", "news", "commute", "breakfast"],
-    "ingredients": ["eggs"],
-    "time_constraint": "10 minutes"
+    "destination": "Downtown",
+    "sections": ["weather", "commute", "news", "breakfast"],
+    "ingredients": ["chicken", "spinach"],
+    "meal_type": "lunch",
+    "time_constraint": "15 minutes",
+    "travel_intent": false,
+    "days": 2,
+    "budget": "moderate"
   },
   "sections": {
-    "weather":   { "section": "weather",   "status": "success", "data": { ... } },
-    "news":      { "section": "news",      "status": "success", "data": { ... } },
-    "commute":   { "section": "commute",   "status": "success", "data": { ... } },
-    "breakfast": { "section": "breakfast", "status": "success", "data": { ... } }
+    "weather": {
+      "section": "weather",
+      "status": "success",
+      "data": {
+        "city": "Chicago",
+        "temp": 24,
+        "high": 27,
+        "low": 19,
+        "condition": "Clear Sky",
+        "uv_index": 6.2,
+        "uv_label": "High",
+        "hourly": [
+          {"time": "06:00", "temp": 19, "uv": 0.1},
+          {"time": "09:00", "temp": 22, "uv": 2.4},
+          {"time": "12:00", "temp": 26, "uv": 6.2},
+          {"time": "15:00", "temp": 27, "uv": 4.8},
+          {"time": "18:00", "temp": 23, "uv": 0.5}
+        ]
+      }
+    },
+    "commute": {
+      "section": "commute",
+      "status": "success",
+      "data": {
+        "origin": {"label": "Chicago", "lat": 41.8781, "lon": -87.6298},
+        "dest": {"label": "Downtown", "lat": 41.8827, "lon": -87.6233},
+        "recommended_mode": "drive",
+        "eta_minutes": 14,
+        "distance_km": 4.2,
+        "source": "TomTom",
+        "polyline": [[41.8781, -87.6298], [41.8805, -87.6265], [41.8827, -87.6233]],
+        "alternates": [
+          {"mode": "transit", "eta_minutes": 18, "distance_km": 4.0},
+          {"mode": "bike", "eta_minutes": 16, "distance_km": 3.8},
+          {"mode": "walk", "eta_minutes": 45, "distance_km": 3.6}
+        ],
+        "alerts": []
+      }
+    },
+    "breakfast": {
+      "section": "breakfast",
+      "status": "success",
+      "data": {
+        "name": "Spinach & Chicken Mediterranean Skillet",
+        "recipe_name": "Spinach & Chicken Mediterranean Skillet",
+        "meal_type": "lunch",
+        "prep_time_minutes": 7,
+        "cook_time_minutes": 8,
+        "total_time_minutes": 15,
+        "ingredients_used": ["chicken breast", "fresh spinach"],
+        "pantry_staples": ["1 tbsp olive oil", "1 clove garlic", "sea salt", "black pepper"],
+        "steps": [
+          "Dice chicken breast and season with salt, pepper, and garlic.",
+          "Heat olive oil in a skillet over medium-high heat and sear chicken for 6 minutes.",
+          "Toss in spinach leaves and cook for 2 minutes until wilted.",
+          "Serve immediately with a lemon wedge."
+        ],
+        "nutrition_highlights": "32g Protein · Low Carb · 280 kcal",
+        "chef_tip": "Sear the chicken in a hot skillet without overcrowding to lock in moisture.",
+        "category": "Quick Lunch",
+        "area": "Mediterranean"
+      }
+    },
+    "news": {
+      "section": "news",
+      "status": "success",
+      "data": {
+        "headlines": [
+          {
+            "title": "Global Clean Energy Investments Reach New Milestone in 2026",
+            "source": "BBC News",
+            "url": "https://bbc.com/news/world-12345",
+            "published_at": "2026-08-17T15:00:00Z"
+          }
+        ]
+      }
+    }
   },
-  "briefing": "Good morning! Here's your briefing for Chicago. 🌤️ It's 28°C...",
-  "summary": "Good morning! Here's your briefing for Chicago. 🌤️ It's 28°C...",
+  "summary": "Good afternoon! In Chicago, it's 24°C and clear with high UV (6.2). Your drive to Downtown will take 14 minutes. For lunch, try Spinach & Chicken Mediterranean Skillet (7-min prep) featuring chicken and spinach. Tip: Sear chicken in a hot skillet to lock in moisture.",
+  "briefing": "Good afternoon! In Chicago...",
   "loop_trace": [
     {
       "step": 1,
-      "thought": "I need weather data. Server 'weather' exposes ['get_weather']. I'll call 'get_weather' with {'location': 'Chicago'}.",
+      "thought": "I need weather data for Chicago. FastMCP server 'weather' exposes ['get_weather'].",
       "action": "weather.get_weather",
-      "action_args": { "location": "Chicago" },
-      "observation": "Got weather: 28.0°C, UV 5.2, condition: Hot & Sunny.",
-      "duration_ms": 1234
+      "action_args": {"location": "Chicago"},
+      "observation": "Received weather data: 24°C, UV 6.2, condition: Clear Sky.",
+      "duration_ms": 320
     },
     {
       "step": 2,
-      "thought": "I need news data. Server 'news' exposes ['get_headlines']. I'll call 'get_headlines' with {}.",
+      "thought": "I need commute data between Chicago and Downtown.",
+      "action": "commute.get_commute_route",
+      "action_args": {"origin": "Chicago", "dest": "Downtown", "mode": "drive"},
+      "observation": "Received route: 14 minutes (4.2 km).",
+      "duration_ms": 410
+    },
+    {
+      "step": 3,
+      "thought": "Generating lunch idea featuring chicken and spinach within 15 minutes.",
+      "action": "recipe.get_meal_recipe",
+      "action_args": {"ingredients": ["chicken", "spinach"], "time_constraint": "15 min", "meal_type": "lunch"},
+      "observation": "Generated recipe: Spinach & Chicken Mediterranean Skillet.",
+      "duration_ms": 780
+    },
+    {
+      "step": 4,
+      "thought": "Fetching top news headlines.",
       "action": "news.get_headlines",
       "action_args": {},
-      "observation": "Got 5 headlines.",
-      "duration_ms": 890
+      "observation": "Received 5 verified headlines.",
+      "duration_ms": 250
     },
     {
       "step": 5,
-      "thought": "All requested sections fulfilled. Proceeding to reflection.",
-      "action": "finish_complete",
+      "thought": "All requested sections gathered. Running cross-section reflection.",
+      "action": "reflect",
       "action_args": {},
-      "observation": "Successfully gathered 4 sections: ['weather', 'news', 'commute', 'breakfast'].",
-      "duration_ms": 0
+      "observation": "Reflection confirmed: Commute time and lunch prep are compatible; Lunch choice suits current conditions.",
+      "duration_ms": 5
     },
     {
       "step": 6,
-      "thought": "Reviewing all gathered data for cross-section consistency.",
-      "action": "reflect",
-      "action_args": {},
-      "observation": "Reflection confirmed all answers: Weather and commute mode are consistent; Breakfast choice suits the weather.",
-      "duration_ms": 0
-    },
-    {
-      "step": 7,
-      "thought": "Composing a concise, friendly summary that references fetched data.",
+      "thought": "Composing natural language synthesis.",
       "action": "synthesize_response",
       "action_args": {},
-      "observation": "Generated 312-character summary.",
-      "duration_ms": 0
+      "observation": "Generated natural language briefing summary.",
+      "duration_ms": 10
     }
   ],
   "reflection": {
     "changes_made": [],
     "confirmations": [
-      "Weather and commute mode are consistent",
-      "Commute time and breakfast prep are compatible",
-      "Breakfast choice suits the weather"
+      "Commute time and lunch prep are compatible",
+      "Lunch choice suits the weather",
+      "All sections reviewed — no adjustments needed"
     ]
   },
   "tools_discovered": {
     "weather": ["get_weather"],
+    "commute": ["get_commute_route", "get_commute_advice"],
+    "recipe": ["get_meal_recipe", "get_recipe"],
     "news": ["get_headlines"],
-    "recipe": ["get_recipe"],
-    "commute": ["get_commute_route", "get_commute_advice"]
+    "itinerary": ["get_itinerary"],
+    "gmail": ["send_email_briefing", "send_itinerary_email"]
   }
 }
 ```
 
-The `sections` object contains whichever agents completed within the 45-second hard timeout. Any section that failed returns an error envelope (see §3.5) rather than crashing the whole briefing.
-
-**New fields (Phase 8):**
-- `loop_trace` — full ReAct reasoning trace showing Thought → Action → Observation for each step
-- `reflection` — cross-section consistency check results (`changes_made` lists modifications; `confirmations` lists verified-consistent pairs)
-- `summary` — friendly natural-language briefing referencing real data
-- `tools_discovered` — map of server name → list of tool names discovered during the agentic loop
-- `briefing` — alias for `summary` (backward compatibility)
-
-Error (empty query):
-```json
-{ "error": "Please enter what you would like in your briefing." }
-```
-
-Error (timeout):
-```json
-{ "error": "The briefing took too long. Check your network connection and try again." }
-```
-
 ---
 
-## 2. SSE Streaming
+## 3. Server-Sent Events (SSE) Streaming
 
-**`GET /api/briefing/{session_id}/stream`**
+### `GET /api/briefing/{session_id}/stream`
 
-Opens a Server-Sent Events stream. Each agent runs in a parallel daemon thread; one `data:` event is emitted as each section completes. The client does not need to wait for all agents.
+Establishes a persistent SSE stream (`text/event-stream`). As each agent completes execution in its background thread, a JSON event is immediately emitted.
 
-Event format — one per section:
+#### Event Stream Format:
 ```
-data: {"section":"weather","status":"success","data":{...}}
+data: {"section":"weather","status":"success","data":{"city":"Chicago","temp":24,...}}
 
-data: {"section":"commute","status":"success","data":{...}}
+data: {"section":"commute","status":"success","data":{"origin":{...},"eta_minutes":14,...}}
+
+data: {"section":"breakfast","status":"success","data":{"name":"Spinach Chicken Skillet","meal_type":"lunch",...}}
+
+data: {"section":"news","status":"success","data":{"headlines":[...]}}
 
 data: {"event":"done"}
 ```
 
-The terminal `{"event":"done"}` event signals the stream is finished. The client should close the `EventSource` on receipt.
-
-Error event (agent failure):
-```
-data: {"section":"news","status":"error","error":{"code":"agent_error","message":"..."}}
-```
-
-Usage pattern in `app.js`:
-1. `POST /api/briefing` — renders any sections already in the response
-2. `GET /api/briefing/{id}/stream` — renders remaining sections as they arrive
-
 ---
 
-## 3. Section Shapes
+## 4. Travel Itinerary & Email Dispatch Endpoints
 
-### 3.1 Weather
+### `POST /api/itinerary`
+Generates a multi-day structured travel itinerary.
+
+#### Request:
 ```json
 {
-  "section": "weather",
-  "status": "success",
-  "data": {
-    "temp": 29.0,
-    "temp_unit": "C",
-    "condition": "Hot & Sunny",
-    "high": 33.2,
-    "low": 22.0,
-    "uv_index": 4.3,
-    "uv_label": "Moderate — wear sunscreen",
-    "source": "openweather+open-meteo",
-    "lat": 41.8781,
-    "lon": -87.6298,
-    "hourly": [
-      { "time": "06:00", "temp": 22.0, "uv_index": 0.0 },
-      { "time": "07:00", "temp": 22.5, "uv_index": 0.1 },
-      { "time": "13:00", "temp": 33.2, "uv_index": 4.3 }
-    ]
-  }
+  "location": "Tokyo",
+  "days": 3,
+  "budget": "moderate",
+  "interests": ["Sightseeing", "Food", "Culture"]
 }
 ```
 
-`hourly` contains real Open-Meteo data for slots 06:00–20:00. `source` is `"openweather+open-meteo"` when the OWM key is present, `"open-meteo"` otherwise.
-
-### 3.2 News
+#### Response (200 OK):
 ```json
 {
-  "section": "news",
   "status": "success",
   "data": {
-    "headlines": [
+    "location": "Tokyo",
+    "days_count": 3,
+    "budget": "moderate",
+    "estimated_cost": "$100 - $160 / day",
+    "days": [
       {
-        "title": "City council approves new bike lanes downtown",
-        "source": "BBC News",
-        "url": "https://www.bbc.co.uk/news/...",
-        "timestamp": "2026-08-09T08:42:00Z"
+        "day_number": 1,
+        "theme": "Tradition Meets Futurism",
+        "morning": {"activity": "Visit Senso-ji Temple", "location": "Asakusa", "time": "08:30 - 11:00 AM"},
+        "afternoon": {"activity": "Explore Electronics & Anime District", "location": "Akihabara", "time": "01:00 - 04:00 PM"},
+        "evening": {"activity": "Observation Deck Night View", "location": "Shibuya Sky", "time": "06:30 - 08:30 PM"},
+        "dining": {"lunch": "Fresh Tempura at Daikokuya", "dinner": "Tonkotsu Ramen in Shibuya"}
       }
-    ]
-  }
-}
-```
-
-Up to 5 headlines. `url` is always present when NewsAPI or a well-formed RSS feed is used. Headlines are clickable in the UI — clicking opens the article in a new tab.
-
-### 3.3 Commute
-```json
-{
-  "section": "commute",
-  "status": "success",
-  "data": {
-    "recommended_mode": "drive",
-    "eta_minutes": 28,
-    "alerts": ["Traffic delay of ~8 min on recommended route."],
-    "alternates": [
-      { "mode": "transit",  "eta_minutes": 40, "distance_km": 18.0, "polyline": [[...]] },
-      { "mode": "bike",     "eta_minutes": 55, "distance_km": 12.0, "polyline": [[...]] },
-      { "mode": "walk",     "eta_minutes": 90, "distance_km": 10.5, "polyline": [[...]] }
     ],
-    "distance_km": 18.0,
-    "polyline": [[41.883, -87.632], [41.884, -87.631], ...],
-    "origin": { "lat": 41.883229, "lon": -87.632398, "label": "Chicago, IL" },
-    "dest":   { "lat": 41.879399, "lon": -87.632324, "label": "Downtown Chicago, Chicago, IL" },
-    "source": "tomtom",
-    "mode_label": "Drive"
-  }
-}
-```
-
-`polyline` is `[[lat, lon], ...]` decoded from TomTom's `points[]` array — ready for Leaflet. `source` is `"tomtom"` when the API key is present and routing succeeds, `"advisory"` otherwise (polylines will be empty arrays in advisory mode). Transit ETA is synthetic (drive ETA + 12 min) because TomTom free tier excludes public transit.
-
-### 3.4 Breakfast
-```json
-{
-  "section": "breakfast",
-  "status": "success",
-  "data": {
-    "recipe_name": "Scrambled Eggs",
-    "prep_time_minutes": 10,
-    "ingredients_used": ["eggs"],
-    "steps": [
-      "Gather your ingredients: eggs.",
-      "Prep and measure everything before you start.",
-      "Cook the Scrambled Eggs over medium heat, stirring occasionally.",
-      "Plate and serve immediately."
-    ],
-    "alternates": [
-      { "recipe_name": "Oat bowl", "prep_time_minutes": 10 }
-    ]
-  }
-}
-```
-
-`steps` comes from MealDB when available; a 4-step generic fallback is generated when the API omits them.
-
-### 3.5 Section-level error
-
-Any section can fail independently without affecting the others:
-```json
-{
-  "section": "news",
-  "status": "error",
-  "error": {
-    "code": "agent_error",
-    "message": "Connection timeout fetching RSS feed."
+    "travel_tips": ["Get a Suica or Pasmo IC card for easy train transfers across Tokyo."]
   }
 }
 ```
 
 ---
 
-## 4. Refresh a Single Card
+### `POST /api/share/email`
+Dispatches an itinerary or briefing email via the FastMCP Gmail tool.
 
-**`POST /api/briefing/{session_id}/{section}/refresh`**
-
-No body required. Re-invokes only that agent with the stored intent. Response shape is identical to §3 for that section.
-
----
-
-## 5. Poll a Single Section
-
-**`GET /api/briefing/{session_id}/{section}`**
-
-Returns the current result for one section by re-running the agent with the stored intent. Same response shape as §3. Returns 404 if the session is not found.
-
----
-
-## 6. Re-run All Agents
-
-**`POST /api/briefing/{session_id}/rerun`**
-
-No body. Re-invokes all agents from the stored intent. Response:
+#### Request:
 ```json
 {
-  "session_id": "guest-20260809180809",
-  "intent": { ... },
-  "sections": { "weather": {...}, "news": {...}, "commute": {...}, "breakfast": {...} }
+  "to_email": "traveler@example.com",
+  "subject": "Your Travel Itinerary for Tokyo",
+  "session_id": "guest-20260817234500",
+  "body_html": "<div style='font-family: Arial;'><h2>Travel Itinerary for Tokyo</h2><p>Here is your schedule...</p></div>",
+  "body_text": "Travel Itinerary for Tokyo\nHere is your schedule..."
+}
+```
+
+#### Response (200 OK):
+```json
+{
+  "success": true,
+  "result": {
+    "status": "sent",
+    "delivered": true,
+    "to": "traveler@example.com",
+    "subject": "Your Travel Itinerary for Tokyo",
+    "message_id": "<172390823900.21708.12345@smtp.gmail.com>"
+  }
 }
 ```
 
 ---
 
-## 7. Update Intent
+## 5. History & Session Management Endpoints
 
-**`PATCH /api/briefing/{session_id}/intent`**
-
-Merges any subset of intent fields and persists to SQLite. Recognised fields: `location`, `sections`, `ingredients`, `time_constraint`, `travel_intent`.
-
-Request:
-```json
-{ "location": "Evanston, IL", "sections": ["weather", "commute"] }
-```
-
-Response:
-```json
-{ "session_id": "guest-20260809180809", "intent": { "location": "Evanston, IL", ... } }
-```
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/history` | Returns a list of the 20 most recent saved briefing sessions. |
+| `GET` | `/api/history/{session_id}` | Retrieves full stored session payload including intent, trace, and section data. |
+| `DELETE` | `/api/history/{session_id}` | Permanently deletes a single session from SQLite database. |
+| `DELETE` | `/api/history` | Clears all stored sessions from SQLite database. |
+| `POST` | `/api/briefing/{session_id}/save` | Marks a session as pinned/saved (`saved = 1`). |
+| `POST` | `/api/briefing/{session_id}/rerun` | Re-executes all agents using the stored session intent. |
+| `POST` | `/api/briefing/{session_id}/{section}/refresh` | Re-executes only the specified agent section (e.g. `breakfast`, `weather`). |
+| `PATCH` | `/api/briefing/{session_id}/intent` | Updates and persists intent fields (e.g., updating location or ingredients). |
 
 ---
 
-## 8. Save / Pin Briefing
+## 6. User Settings & Preferences Endpoints
 
-**`POST /api/briefing/{session_id}/save`**
+### `GET /api/settings`
+Returns persisted application settings from `settings.json`.
 
-No body. Re-runs all sections from stored intent, then calls `SQLiteSessionManager.save_briefing()` which sets `saved=1` and writes `last_sections` to the database.
-
-Response:
-```json
-{ "saved": true, "session_id": "guest-20260809180809" }
-```
-
-Failure:
-```json
-{ "saved": false, "error": { "code": "write_failed", "message": "Briefing not saved — retry?" } }
-```
-
----
-
-## 9. History
-
-**`GET /api/history`** — list 20 most-recent sessions, newest first:
-```json
-{
-  "sessions": [
-    {
-      "session_id": "guest-20260809180809",
-      "user_id": "guest",
-      "created_at": "2026-08-09T18:08:09+00:00",
-      "saved": false,
-      "query": "Weather and commute from Chicago",
-      "location": "Chicago",
-      "sections": ["weather", "commute"]
-    }
-  ]
-}
-```
-
-**`GET /api/history/{session_id}`** — full session detail:
-```json
-{
-  "session_id": "guest-20260809180809",
-  "user_id": "guest",
-  "created_at": "2026-08-09T18:08:09+00:00",
-  "saved": false,
-  "saved_at": null,
-  "intent": { "location": "Chicago", "sections": ["weather", "commute"], ... },
-  "last_sections": null,
-  "interactions": [
-    { "query": "Weather and commute from Chicago", "structured": true, "sections_returned": ["weather","commute"], "timestamp": "..." }
-  ]
-}
-```
-
-Returns 404 if the session does not exist.
-
----
-
-## 10. Settings
-
-**`GET /api/settings`** — returns current settings with defaults for any missing keys:
+#### Response (200 OK):
 ```json
 {
   "default_location": "Chicago, IL",
@@ -378,29 +333,24 @@ Returns 404 if the session does not exist.
 }
 ```
 
-**`PUT /api/settings`** — merges validated updates and persists to `settings.json`:
+### `PUT /api/settings`
+Updates and validates application preferences.
+
+#### Request:
 ```json
 {
-  "default_location": "London",
-  "units": "imperial",
-  "default_sections": ["weather", "news"]
+  "default_location": "London, UK",
+  "units": "metric",
+  "default_sections": ["weather", "commute", "breakfast"]
 }
 ```
 
-Validation rules:
-- `units` must be `"metric"` or `"imperial"` — other values are silently ignored
-- `default_sections` entries must be one of `weather`, `commute`, `news`, `breakfast` — unknown values are filtered out
-
-Response: the full updated settings object (same shape as GET).
-
----
-
-## 11. Common Rules
-
-- Every section response includes `section` (string) and `status` (`"success"` | `"error"`) so the UI can route it to the right card without guessing
-- Section payloads are independent — one failing never blocks or delays another
-- All timestamps are ISO 8601 UTC; the UI localises for display
-- `session_id` from §1 is required on every subsequent call
-- All JSON responses include `Content-Type: application/json; charset=utf-8` and `Access-Control-Allow-Origin: *`
-- The 45-second hard timeout on `POST /api/briefing` is enforced via a daemon thread — if it fires, a `TimeoutError` is returned as a 500 with a user-friendly message
-- The agentic loop adds ~2-3 seconds of overhead vs the legacy `run_structured()` path due to sequential tool discovery + reflection pass
+#### Response (200 OK):
+```json
+{
+  "default_location": "London, UK",
+  "units": "metric",
+  "default_sections": ["weather", "commute", "breakfast"],
+  "news_categories": ["general"]
+}
+```
