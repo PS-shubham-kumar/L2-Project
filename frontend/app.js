@@ -108,6 +108,17 @@ modalBackdrop.addEventListener('click', e => {
   if (e.target === modalBackdrop) closeModal();
 });
 
+// Modal internal action buttons (e.g. from Commute details to interactive planner)
+modalBody?.addEventListener('click', e => {
+  if (e.target.closest('#btn-modal-open-drawer')) {
+    closeModal();
+    openCommuteDrawer();
+  } else if (e.target.closest('#btn-modal-open-map')) {
+    closeModal();
+    openMapModal();
+  }
+});
+
 // Escape key
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
@@ -789,23 +800,34 @@ function buildCommuteDetail(d) {
   const dist = d.distance_km ? `${d.distance_km} km` : '';
   const src = d.source === 'tomtom' ? '🟢 Live data via TomTom' : '🟡 Advisory estimate';
   const alerts = (d.alerts || []).map(a =>
-    `<div class="alert-banner"><span>⚠</span><span>${escHtml(a)}</span></div>`).join('');
+    `<div class="alert-banner" style="margin-bottom:8px"><span>⚠</span><span>${escHtml(a)}</span></div>`).join('');
   const alts = (d.alternates || []).map(a =>
     `<div class="alt-item">
        <b>${escHtml(a.mode.charAt(0).toUpperCase() + a.mode.slice(1))}</b>
        <span>${escHtml(String(a.eta_minutes))} min${a.distance_km ? ' · ' + a.distance_km + ' km' : ''}</span>
      </div>`).join('');
-  const origin = d.origin?.label ? `<p>From: <strong>${escHtml(d.origin.label)}</strong></p>` : '';
-  const destTxt = d.dest?.label ? `<p>To: <strong>${escHtml(d.dest.label)}</strong></p>` : '';
+  const origin = d.origin?.label ? `<p style="margin:4px 0"><strong>Origin:</strong> ${escHtml(d.origin.label)}</p>` : '';
+  const destTxt = d.dest?.label ? `<p style="margin:4px 0"><strong>Destination:</strong> ${escHtml(d.dest.label)}</p>` : '';
 
   return `
-    <h3>Recommended Route</h3>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <h3 style="margin:0">Recommended Route</h3>
+      <span class="chip chip-sm chip-commute" style="text-transform:uppercase;font-size:10px;font-weight:700">${escHtml(label)}</span>
+    </div>
     ${origin}${destTxt}
-    <p>${escHtml(label)} · <strong>${escHtml(String(d.eta_minutes))} min</strong>${dist ? ' · ' + escHtml(dist) : ''}</p>
-    <p style="font-size:10px;color:var(--muted)">${src}</p>
+    <p style="margin:8px 0">Estimated Travel Time: <strong>${escHtml(String(d.eta_minutes))} min</strong>${dist ? ' · Distance: <strong>' + escHtml(dist) + '</strong>' : ''}</p>
+    <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px">${src}</p>
     ${alerts}
-    <h3>Alternatives</h3>
-    <div class="alt-list">${alts || '<p>No alternates.</p>'}</div>`;
+    <h3 style="margin-top:14px">Alternative Transit Modes</h3>
+    <div class="alt-list">${alts || '<p>No alternates available.</p>'}</div>
+    <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-sm" id="btn-modal-open-drawer" type="button" style="display:inline-flex;align-items:center;gap:6px;background:var(--purple-primary,#7260c3);color:white;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer">
+        🗺️ Interactive Route Planner
+      </button>
+      <button class="btn btn-sm btn-outline" id="btn-modal-open-map" type="button" style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer">
+        🔍 Centered Map View
+      </button>
+    </div>`;
 }
 
 function buildBreakfastDetail(d) {
@@ -1089,8 +1111,49 @@ let _drawerRouteLayer = null;
 let _drawerAltLayers = [];
 let _activeCommuteMode = 'drive';
 
-function openCommuteDrawer() {
-  if (state.intent) {
+function openCommuteDrawer(prefillData) {
+  const commPayload = prefillData || state.sections['commute'];
+  const commData = commPayload?.data;
+
+  if (commData) {
+    if (commData.origin?.label) {
+      drawerFrom.value = commData.origin.label;
+    } else if (state.intent?.location && state.intent.location !== 'current location') {
+      drawerFrom.value = state.intent.location;
+    }
+    if (commData.dest?.label) {
+      drawerTo.value = commData.dest.label;
+    } else if (state.intent?.destination) {
+      drawerTo.value = state.intent.destination;
+    }
+
+    if (commData.recommended_mode) {
+      _activeCommuteMode = commData.recommended_mode;
+      document.querySelectorAll('#drawer-modes .drawer-mode-btn').forEach(btn => {
+        const isActive = btn.dataset.mode === _activeCommuteMode;
+        btn.classList.toggle('mode-active', isActive);
+        btn.setAttribute('aria-checked', String(isActive));
+      });
+    }
+
+    // Render text metrics if available
+    if (commData.eta_minutes !== undefined) {
+      drawerEta.textContent = `${commData.eta_minutes} min`;
+      drawerDistance.textContent = `${commData.distance_km || '--'} km`;
+      drawerSource.textContent = commData.source === 'tomtom' ? 'Live TomTom' : (commData.source || 'advisory');
+
+      // Render alerts
+      drawerAlerts.innerHTML = '';
+      (commData.alerts || []).forEach(a => {
+        const banner = document.createElement('div');
+        banner.className = 'alert-banner';
+        banner.innerHTML = `<span>⚠</span><span>${escHtml(a)}</span>`;
+        drawerAlerts.appendChild(banner);
+      });
+
+      drawerResults.classList.remove('hidden');
+    }
+  } else if (state.intent) {
     if (state.intent.location && state.intent.location !== 'current location') {
       drawerFrom.value = state.intent.location;
     }
@@ -1098,6 +1161,7 @@ function openCommuteDrawer() {
       drawerTo.value = state.intent.destination;
     }
   }
+
   commuteDrawer.classList.remove('hidden');
 
   // Initialize map with a small delay so container size is ready
@@ -1115,7 +1179,58 @@ function openCommuteDrawer() {
       _drawerMap.setView([20.5937, 78.9629], 5);
     }
     _drawerMap.invalidateSize();
+
+    if (commData && (commData.polyline?.length >= 2 || (commData.origin?.lat && commData.dest?.lat))) {
+      renderDrawerMapRoute(commData);
+    }
   }, 200);
+}
+
+function renderDrawerMapRoute(data) {
+  if (!_drawerMap) return;
+  _drawerMap.invalidateSize();
+
+  const origin = data.origin || {};
+  const dest = data.dest || {};
+  const polyline = data.polyline || [];
+
+  // Clear previous layer
+  if (_drawerRouteLayer) {
+    _drawerRouteLayer.clearLayers();
+  } else {
+    _drawerRouteLayer = L.layerGroup().addTo(_drawerMap);
+  }
+  _drawerAltLayers.forEach(l => _drawerMap.removeLayer(l));
+  _drawerAltLayers = [];
+
+  // Draw main route polyline
+  if (polyline.length >= 2) {
+    const routeLine = L.polyline(polyline, {
+      color: '#7260c3',
+      weight: 5,
+      opacity: 0.85,
+      lineJoin: 'round',
+    }).addTo(_drawerRouteLayer);
+
+    _drawerMap.fitBounds(routeLine.getBounds(), { padding: [35, 35] });
+  } else if (origin.lat && origin.lon) {
+    _drawerMap.setView([origin.lat, origin.lon], 12);
+  }
+
+  // Draw pins
+  const originIcon = _ORIGIN_ICON || _makePinIcon('#7260c3');
+  const destIcon = _DEST_ICON || _makePinIcon('#f06a9a');
+
+  if (origin.lat && origin.lon) {
+    L.marker([origin.lat, origin.lon], { icon: originIcon })
+      .bindPopup(`<b>Start</b><br>${origin.label || ''}`)
+      .addTo(_drawerRouteLayer);
+  }
+  if (dest.lat && dest.lon) {
+    L.marker([dest.lat, dest.lon], { icon: destIcon })
+      .bindPopup(`<b>Destination</b><br>${dest.label || ''}`)
+      .addTo(_drawerRouteLayer);
+  }
 }
 
 function closeCommuteDrawer() {
@@ -1195,51 +1310,7 @@ async function calculateDrawerRoute() {
 
     // Draw Leaflet Route Map
     setTimeout(() => {
-      if (_drawerMap) {
-        _drawerMap.invalidateSize();
-
-        const origin = data.origin || {};
-        const dest = data.dest || {};
-        const polyline = data.polyline || [];
-
-        // Clear previous layer
-        if (_drawerRouteLayer) {
-          _drawerRouteLayer.clearLayers();
-        } else {
-          _drawerRouteLayer = L.layerGroup().addTo(_drawerMap);
-        }
-        _drawerAltLayers.forEach(l => _drawerMap.removeLayer(l));
-        _drawerAltLayers = [];
-
-        // Draw main route polyline
-        if (polyline.length >= 2) {
-          const routeLine = L.polyline(polyline, {
-            color: '#7260c3',
-            weight: 5,
-            opacity: 0.85,
-            lineJoin: 'round',
-          }).addTo(_drawerRouteLayer);
-
-          _drawerMap.fitBounds(routeLine.getBounds(), { padding: [35, 35] });
-        } else {
-          _drawerMap.setView([origin.lat || 20, origin.lon || 78], 12);
-        }
-
-        // Draw pins
-        const originIcon = _ORIGIN_ICON || _makePinIcon('#7260c3');
-        const destIcon = _DEST_ICON || _makePinIcon('#f06a9a');
-
-        if (origin.lat && origin.lon) {
-          L.marker([origin.lat, origin.lon], { icon: originIcon })
-            .bindPopup(`<b>Start</b><br>${origin.label || ''}`)
-            .addTo(_drawerRouteLayer);
-        }
-        if (dest.lat && dest.lon) {
-          L.marker([dest.lat, dest.lon], { icon: destIcon })
-            .bindPopup(`<b>Destination</b><br>${dest.label || ''}`)
-            .addTo(_drawerRouteLayer);
-        }
-      }
+      renderDrawerMapRoute(data);
     }, 200);
 
     // Sync to main page commute map & cards

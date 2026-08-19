@@ -1,7 +1,7 @@
 [
   {
     "id": "ext_refl_01_triple_heat_uv_meal",
-    "description": "Triple Conflict: Temp 42°C, UV 11.5, Biking mode, and Hot Porridge requested",
+    "description": "Compound Conflict: Temp 42°C (Heat switches Biking to Drive), UV 11.5, and Hot Porridge requested",
     "sections": {
       "weather": {
         "section": "weather",
@@ -20,9 +20,9 @@
       }
     },
     "intent": { "location": "Las Vegas", "destination": "Strip" },
-    "expected_overrides_count": 3,
+    "expected_overrides_count": 2,
     "expected_mode_override": "drive",
-    "expected_alert_substrings": ["Extreme heat", "UV index is very high"],
+    "expected_alert_substrings": ["Extreme heat"],
     "expected_note_substring": "cold or light"
   },
   {

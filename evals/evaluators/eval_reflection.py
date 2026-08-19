@@ -2,8 +2,16 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict, List
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+SRC_DIR = PROJECT_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from agents.reflection import ReflectionEngine
 
@@ -29,6 +37,7 @@ def evaluate_reflection_matrix(dataset_path: Path | None = None) -> Dict[str, An
         exp_overrides = item.get("expected_overrides_count", 0)
         exp_mode = item.get("expected_mode_override")
         exp_alert = item.get("expected_alert_substring")
+        exp_alerts = item.get("expected_alert_substrings", [])
         exp_note = item.get("expected_note_substring")
         min_conf = item.get("min_confirmations", 0)
 
@@ -52,6 +61,12 @@ def evaluate_reflection_matrix(dataset_path: Path | None = None) -> Dict[str, An
             alerts = sections.get("commute", {}).get("data", {}).get("alerts", [])
             if not any(exp_alert.lower() in a.lower() for a in alerts):
                 case_ok = False
+
+        if exp_alerts:
+            alerts = sections.get("commute", {}).get("data", {}).get("alerts", [])
+            for a_sub in exp_alerts:
+                if not any(a_sub.lower() in a.lower() for a in alerts):
+                    case_ok = False
 
         # Check note substring in meal/breakfast data
         if exp_note:

@@ -170,6 +170,89 @@ class TestReflectionEngine(unittest.TestCase):
         self.assertGreater(len(result.changes_made), 0,
                           "Reflection should change at least one answer on extreme data")
 
+    def test_heatwave_override_suppresses_contradictory_bike_uv_alert(self):
+        """Bug 1: When 38°C switches bike to drive, Rule 3 must NOT warn sunscreen for bike."""
+        sections = {
+            "weather": _make_weather(38, uv=10.0),
+            "commute": _make_commute("bike"),
+        }
+        result = self.engine.reflect(sections, {})
+        self.assertEqual(len(result.changes_made), 1)
+        self.assertEqual(sections["commute"]["data"]["recommended_mode"], "drive")
+        alerts = sections["commute"]["data"]["alerts"]
+        self.assertTrue(any("Extreme heat" in a for a in alerts))
+        self.assertFalse(any("UV index is very high" in a for a in alerts))
+
+    def test_high_uv_alert_fires_when_commute_remains_bike(self):
+        """Rule 3: 28°C + UV 9.5 + bike -> mode remains bike and UV alert fires."""
+        sections = {
+            "weather": _make_weather(28, uv=9.5),
+            "commute": _make_commute("bike"),
+        }
+        result = self.engine.reflect(sections, {})
+        self.assertEqual(len(result.changes_made), 1)
+        self.assertEqual(sections["commute"]["data"]["recommended_mode"], "bike")
+        alerts = sections["commute"]["data"]["alerts"]
+        self.assertTrue(any("UV index is very high" in a for a in alerts))
+
+    def test_meal_pairing_supports_name_field_fallback(self):
+        """Bug 2: Rule 5 must work when recipe dictionary uses 'name' instead of 'recipe_name'."""
+        sections = {
+            "weather": _make_weather(33),
+            "breakfast": {
+                "section": "breakfast",
+                "status": "success",
+                "data": {
+                    "name": "Spicy Lamb Curry",
+                    "prep_time_minutes": 10,
+                    "meal_type": "lunch",
+                },
+            },
+        }
+        result = self.engine.reflect(sections, {})
+        self.assertEqual(len(result.changes_made), 1)
+        self.assertIn("reflection_note", sections["breakfast"]["data"])
+        self.assertIn("cold or light", sections["breakfast"]["data"]["reflection_note"])
+
+    def test_meal_pairing_expanded_hot_keywords(self):
+        """Bug 2: Rule 5 catches broad hot meals (ramen, soup, chili, casserole)."""
+        for dish in ["Tonkotsu Ramen", "Tomato Basil Soup", "Chili Con Carne", "Beef Casserole"]:
+            with self.subTest(dish=dish):
+                sections = {
+                    "weather": _make_weather(34),
+                    "breakfast": _make_breakfast(dish),
+                }
+                result = self.engine.reflect(sections, {})
+                self.assertGreater(len(result.changes_made), 0, f"Expected override for hot dish: {dish}")
+                self.assertIn("reflection_note", sections["breakfast"]["data"])
+
+    def test_meal_pairing_expanded_cold_keywords(self):
+        """Bug 2: Rule 5 catches broad cold meals in freezing weather (smoothie, poke, gazpacho)."""
+        for dish in ["Berry Smoothie Bowl", "Salmon Poke Bowl", "Chilled Cucumber Gazpacho"]:
+            with self.subTest(dish=dish):
+                sections = {
+                    "weather": _make_weather(-2),
+                    "breakfast": _make_breakfast(dish),
+                }
+                result = self.engine.reflect(sections, {})
+                self.assertGreater(len(result.changes_made), 0, f"Expected override for cold dish in winter: {dish}")
+                self.assertIn("reflection_note", sections["breakfast"]["data"])
+                self.assertIn("warm, hearty", sections["breakfast"]["data"]["reflection_note"])
+
+    def test_compound_multiple_rules_consistent_count(self):
+        """Bug 3: Test valid compound scenario without contradictory rules."""
+        # 26°C + UV 9.0 (Rule 3 UV alert for bike) + 50m commute with 20m breakfast (Rule 4 time note)
+        sections = {
+            "weather": _make_weather(26, uv=9.0),
+            "commute": _make_commute("bike", eta=50),
+            "breakfast": _make_breakfast("Avocado Toast", prep=20),
+        }
+        result = self.engine.reflect(sections, {})
+        self.assertEqual(len(result.changes_made), 2)
+        alerts = sections["commute"]["data"]["alerts"]
+        self.assertTrue(any("UV" in a for a in alerts))
+        self.assertIn("reflection_note", sections["breakfast"]["data"])
+
 
 if __name__ == "__main__":
     unittest.main()

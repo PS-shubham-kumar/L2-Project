@@ -45,11 +45,9 @@ class ReflectionEngine:
         breakfast_data = self._extract_breakfast(sections)
 
         # ── Rule 1: Hot weather + outdoor commute ──────────────────────────
-        original_commute_mode = None
         if weather_data and commute_data:
             temp = weather_data.get("temp")
             mode = commute_data.get("recommended_mode", "drive")
-            original_commute_mode = mode
             if temp is not None and temp >= 35 and mode in ("bike", "walk"):
                 # Adjust: switch recommendation to drive
                 commute_section = sections.get("commute", {})
@@ -73,7 +71,7 @@ class ReflectionEngine:
         # ── Rule 2: Cold weather + walking ─────────────────────────────────
         if weather_data and commute_data:
             temp = weather_data.get("temp")
-            mode = original_commute_mode or commute_data.get("recommended_mode", "drive")
+            mode = commute_data.get("recommended_mode", "drive")
             if temp is not None and temp <= 2 and mode in ("walk", "bike"):
                 commute_section = sections.get("commute", {})
                 data = commute_section.get("data", {})
@@ -89,7 +87,8 @@ class ReflectionEngine:
         # ── Rule 3: High UV + outdoor commute ─────────────────────────────
         if weather_data and commute_data:
             uv = weather_data.get("uv_index")
-            mode = original_commute_mode or commute_data.get("recommended_mode", "drive")
+            # Always read current commute mode (never stale pre-override mode)
+            mode = commute_data.get("recommended_mode", "drive")
             if uv is not None and isinstance(uv, (int, float)) and uv >= 8 and mode in ("bike", "walk"):
                 commute_section = sections.get("commute", {})
                 data = commute_section.get("data", {})
@@ -125,9 +124,27 @@ class ReflectionEngine:
         # ── Rule 5: Weather + meal pairing ───────────────────────────
         if weather_data and breakfast_data:
             temp = weather_data.get("temp")
-            recipe = breakfast_data.get("recipe_name", "")
+            recipe = (
+                breakfast_data.get("recipe_name")
+                or breakfast_data.get("name")
+                or breakfast_data.get("title")
+                or ""
+            )
             m_type = breakfast_data.get("meal_type", "meal")
-            if temp is not None and temp >= 30 and ("hot" in recipe.lower() or "stew" in recipe.lower() or "porridge" in recipe.lower()):
+            recipe_lower = recipe.lower()
+
+            hot_dish_keywords = (
+                "hot", "stew", "porridge", "soup", "curry", "ramen",
+                "casserole", "chili", "pot roast", "chowder", "goulash",
+                "oatmeal", "pho", "broth", "fondue", "gumbo", "bisque", "tagine"
+            )
+            cold_dish_keywords = (
+                "salad", "cold", "chilled", "smoothie", "gazpacho",
+                "ice", "iced", "frozen", "poke", "ceviche", "acai", "açaí",
+                "raw", "overnight oats"
+            )
+
+            if temp is not None and temp >= 30 and any(kw in recipe_lower for kw in hot_dish_keywords):
                 breakfast_section = sections.get("breakfast") or sections.get("meal", {})
                 data = breakfast_section.get("data", {})
                 data["reflection_note"] = (
@@ -137,7 +154,7 @@ class ReflectionEngine:
                 result.changes_made.append(
                     f"Suggested lighter {m_type} due to {temp}°C heat"
                 )
-            elif temp is not None and temp <= 5 and ("salad" in recipe.lower() or "cold" in recipe.lower()):
+            elif temp is not None and temp <= 5 and any(kw in recipe_lower for kw in cold_dish_keywords):
                 breakfast_section = sections.get("breakfast") or sections.get("meal", {})
                 data = breakfast_section.get("data", {})
                 data["reflection_note"] = (

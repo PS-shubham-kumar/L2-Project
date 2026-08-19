@@ -137,5 +137,75 @@
     "intent": { "location": "San Francisco", "destination": "Palo Alto" },
     "expected_overrides_count": 0,
     "min_confirmations": 2
+  },
+  {
+    "id": "refl_08_compound_uv_and_slow_meal",
+    "description": "Compound Rule 3 + Rule 4: High UV with Bike commute + Long commute & slow breakfast",
+    "sections": {
+      "weather": {
+        "section": "weather",
+        "status": "success",
+        "data": { "temp": 26, "condition": "Sunny", "uv_index": 9.5 }
+      },
+      "commute": {
+        "section": "commute",
+        "status": "success",
+        "data": { "recommended_mode": "bike", "eta_minutes": 50, "distance_km": 12.0 }
+      },
+      "breakfast": {
+        "section": "breakfast",
+        "status": "success",
+        "data": { "recipe_name": "Avocado Toast with Poached Eggs", "prep_time_minutes": 20, "meal_type": "breakfast" }
+      }
+    },
+    "intent": { "location": "San Diego", "destination": "La Jolla" },
+    "expected_overrides_count": 2,
+    "expected_alert_substring": "UV index is very high",
+    "expected_note_substring": "consider a quicker"
+  },
+  {
+    "id": "refl_09_compound_cold_and_cold_meal",
+    "description": "Compound Rule 2 + Rule 5: Freezing weather walking alert + chilled meal comfort suggestion",
+    "sections": {
+      "weather": {
+        "section": "weather",
+        "status": "success",
+        "data": { "temp": 0, "condition": "Freezing", "uv_index": 1.0 }
+      },
+      "commute": {
+        "section": "commute",
+        "status": "success",
+        "data": { "recommended_mode": "walk", "eta_minutes": 20, "distance_km": 1.5 }
+      },
+      "breakfast": {
+        "section": "breakfast",
+        "status": "success",
+        "data": { "name": "Cold Pasta Salad with Tuna", "prep_time_minutes": 10, "meal_type": "lunch" }
+      }
+    },
+    "intent": { "location": "Boston", "destination": "Back Bay" },
+    "expected_overrides_count": 2,
+    "expected_alert_substring": "Freezing conditions",
+    "expected_note_substring": "warm, hearty"
+  },
+  {
+    "id": "refl_10_heatwave_suppresses_uv_bike_alert",
+    "description": "Heatwave Override: 38°C with Bike commute switches to Drive, suppressing UV bike alert (non-contradictory)",
+    "sections": {
+      "weather": {
+        "section": "weather",
+        "status": "success",
+        "data": { "temp": 38, "condition": "Scorching Sun", "uv_index": 10.0 }
+      },
+      "commute": {
+        "section": "commute",
+        "status": "success",
+        "data": { "recommended_mode": "bike", "eta_minutes": 25, "distance_km": 5.0 }
+      }
+    },
+    "intent": { "location": "Phoenix", "destination": "Scottsdale" },
+    "expected_overrides_count": 1,
+    "expected_mode_override": "drive",
+    "expected_alert_substring": "Extreme heat"
   }
 ]
