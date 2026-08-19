@@ -354,3 +354,105 @@ Updates and validates application preferences.
   "news_categories": ["general"]
 }
 ```
+
+---
+
+## 7. Observability & Telemetry Endpoints
+
+### `GET /api/observability/metrics`
+Returns rolling application performance telemetry, tool invocation counts, error rates, latency percentiles (P50/P95), and token consumption.
+
+#### Response (200 OK):
+```json
+{
+  "total_requests": 42,
+  "total_tool_calls": 128,
+  "tool_calls_by_server": {
+    "weather": 38,
+    "commute": 35,
+    "recipe": 32,
+    "news": 23
+  },
+  "avg_tool_latency_ms": 284.5,
+  "p50_tool_latency_ms": 195.0,
+  "p95_tool_latency_ms": 820.0,
+  "llm_requests": 64,
+  "total_tokens_consumed": 48210,
+  "avg_llm_latency_ms": 1420.0,
+  "error_count": 0,
+  "uptime_seconds": 1845.2
+}
+```
+
+### `GET /api/observability/traces`
+Returns a list of the 50 most recent ReAct agent execution traces recorded by `src/services/telemetry.py`.
+
+#### Query Parameters:
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `limit` | `integer` | No | Number of traces to return (default `50`, max `100`). |
+
+#### Response (200 OK):
+```json
+{
+  "traces": [
+    {
+      "trace_id": "trace-8f92a10c",
+      "session_id": "guest-20260819124500",
+      "query": "Chicago weather, traffic to Loop, and 10 min breakfast",
+      "status": "success",
+      "duration_ms": 4820.5,
+      "step_count": 7,
+      "tool_count": 3,
+      "timestamp": "2026-08-19T12:45:04.821Z"
+    }
+  ]
+}
+```
+
+### `GET /api/observability/traces/{trace_id}`
+Retrieves full span-level waterfall breakdown, event timeline, and execution metadata for a specific execution trace.
+
+#### Response (200 OK):
+```json
+{
+  "trace_id": "trace-8f92a10c",
+  "session_id": "guest-20260819124500",
+  "query": "Chicago weather, traffic to Loop, and 10 min breakfast",
+  "status": "success",
+  "total_duration_ms": 4820.5,
+  "spans": [
+    {
+      "name": "perceive_intent",
+      "duration_ms": 12.4,
+      "status": "OK",
+      "attributes": {"sections": ["weather", "commute", "breakfast"]}
+    },
+    {
+      "name": "tool_weather.get_weather",
+      "duration_ms": 1640.2,
+      "status": "OK",
+      "attributes": {"city": "Chicago"}
+    },
+    {
+      "name": "tool_commute.get_commute_route",
+      "duration_ms": 1820.1,
+      "status": "OK",
+      "attributes": {"origin": "Chicago", "destination": "Loop"}
+    },
+    {
+      "name": "reflection_audit",
+      "duration_ms": 2.1,
+      "status": "OK",
+      "attributes": {"overrides": 0}
+    },
+    {
+      "name": "synthesize_summary",
+      "duration_ms": 1340.0,
+      "status": "OK",
+      "attributes": {"tokens": 620}
+    }
+  ]
+}
+```
+

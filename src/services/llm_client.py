@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
@@ -148,17 +149,51 @@ class LLMClient:
                 headers=headers,
                 method="POST",
             )
+            t0 = time.perf_counter()
             with urllib.request.urlopen(req, timeout=30) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
+                duration_ms = (time.perf_counter() - t0) * 1000
+                usage = data.get("usage", {})
+                prompt_tokens = usage.get("prompt_tokens", 0)
+                comp_tokens = usage.get("completion_tokens", 0)
+                try:
+                    from services.telemetry import telemetry
+                    provider = "nim" if "nvidia" in self.base_url else ("groq" if "groq" in self.base_url else "openai")
+                    telemetry.llm(provider, self.model, duration_ms, prompt_tokens, comp_tokens, status="OK")
+                except Exception:
+                    pass
                 return data
         except urllib.error.HTTPError as err:
             err_body = err.read().decode("utf-8", errors="ignore")
             logger.error("LLM API HTTPError %d: %s", err.code, err_body)
+            try:
+                from services.telemetry import telemetry
+                telemetry.error("LLM", f"HTTPError {err.code}: {err_body}")
+            except Exception:
+                pass
             raise RuntimeError(f"LLM API error {err.code}: {err_body}") from err
         except Exception as exc:
             logger.error("LLM API request failed: %s", exc)
+            try:
+                from services.telemetry import telemetry
+                telemetry.error("LLM", f"Request failed: {exc}")
+            except Exception:
+                pass
             raise RuntimeError(f"Failed to communicate with LLM API: {exc}") from exc
+
+    def complete(self, prompt: str, temperature: float = 0.2) -> str:
+        """Send a single prompt string and return the assistant's text content response."""
+        res = self.chat_completion(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+        )
+        choices = res.get("choices", [])
+        if choices and "message" in choices[0]:
+            return choices[0]["message"].get("content", "")
+        return ""
 
 
 # Backwards compatibility alias
 XAIClient = LLMClient
+
+

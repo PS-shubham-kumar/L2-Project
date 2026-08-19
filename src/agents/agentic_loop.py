@@ -340,6 +340,12 @@ class AgenticLoop:
         """
 
         # ── Step 1: PERCEIVE ───────────────────────────────────────────────
+        try:
+            from services.telemetry import telemetry
+            telemetry.agent(f"PERCEIVE: parsing query '{query}'", trace_id=session_id, agent_name="agentic_loop")
+        except Exception:
+            telemetry = None
+
         parsed = self.parser.parse(query)
         intent = {
             "location": parsed.get("location", ""),
@@ -357,6 +363,8 @@ class AgenticLoop:
 
         # ── Step 2: PLAN ───────────────────────────────────────────────────
         routed_sections = self.router.route(intent["sections"])
+        if telemetry:
+            telemetry.agent(f"PLAN: routed sections -> {routed_sections}", trace_id=session_id, agent_name="router")
         pending = list(routed_sections)
         fulfilled: Dict[str, Any] = {}
         trace: List[TraceStep] = []
@@ -439,11 +447,16 @@ class AgenticLoop:
                 else:
                     obs = f"Got result for {section}."
 
+                if telemetry:
+                    telemetry.tool(server_name, tool_name, elapsed_ms, status="OK", trace_id=session_id)
+
                 fulfilled[section] = shaped
 
             except Exception as exc:
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
                 obs = f"Error calling {action}: {exc}"
+                if telemetry:
+                    telemetry.tool(server_name, tool_name, elapsed_ms, status="ERROR", trace_id=session_id, error=str(exc))
                 fulfilled[section] = {
                     "section": section,
                     "status": "error",
@@ -458,6 +471,7 @@ class AgenticLoop:
                 observation=obs,
                 duration_ms=elapsed_ms,
             ))
+
 
         # ── DECIDE: check completeness ─────────────────────────────────────
         missing = [s for s in routed_sections if s not in fulfilled]
@@ -489,6 +503,9 @@ class AgenticLoop:
         else:
             refl_obs = f"Reflection confirmed all answers: {'; '.join(reflection.confirmations)}"
 
+        if telemetry:
+            telemetry.reflection(refl_obs, trace_id=session_id, overrides_count=len(reflection.changes_made))
+
         trace.append(TraceStep(
             step=step_num,
             thought="Reviewing all gathered data for cross-section consistency.",
@@ -508,6 +525,28 @@ class AgenticLoop:
             action_args={},
             observation=f"Generated {len(summary)}-character summary.",
         ))
+
+        if telemetry:
+            telemetry.agent(f"RESPOND: Completed ReAct briefing in {step_num} steps", trace_id=session_id, agent_name="agentic_loop")
+            telemetry.record_trace({
+                "session_id": session_id,
+                "query": query,
+                "intent": intent,
+                "sections_count": len(fulfilled),
+                "total_steps": len(trace),
+                "steps": [
+                    {
+                        "step": s.step,
+                        "thought": s.thought,
+                        "action": s.action,
+                        "action_args": s.action_args,
+                        "observation": s.observation,
+                        "duration_ms": s.duration_ms,
+                    }
+                    for s in trace
+                ],
+                "reflection_changes": reflection.changes_made if reflection else [],
+            })
 
         return AgenticResult(
             session_id=session_id,

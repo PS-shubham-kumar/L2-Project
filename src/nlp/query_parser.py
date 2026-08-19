@@ -18,14 +18,17 @@ class QueryParser:
         # Use whole-word patterns to avoid substring false-positives (e.g. "eat" inside "weather")
         self.section_keywords = {
             "weather":   [r"\bweather\b", r"\bforecast\b", r"\btemperature\b", r"\btemp\b",
-                          r"\brain\b", r"\bsunny\b", r"\bcloudy\b", r"\buv\b", r"\bsun\b"],
+                          r"\brain\b", r"\bsunny\b", r"\bcloudy\b", r"\buv\b", r"\bsun\b",
+                          r"\bumbrella\b", r"\braincoat\b", r"\bchilly\b", r"\bfreezing\b",
+                          r"\bheatwave\b", r"\bblizzard\b", r"\bsnow\b"],
             "news":      [r"\bnews\b", r"\bheadlines\b", r"\bheadline\b", r"\blatest\b",
-                          r"\bupdate\b", r"\bupdates\b"],
+                          r"(?<!traffic\s)(?<!transit\s)\bupdates?\b"],
             "commute":   [r"\bcommute\b", r"\bcommuting\b", r"\btraffic\b", r"\btransit\b",
-                          r"\btravel\b", r"\broute\b", r"\bdrive\b", r"\bdriving\b",
-                          r"\bbus\b", r"\btrain\b", r"\bbike\b", r"\bcycling\b",
-                          r"\bwalk\b", r"\bwalking\b", r"\beta\b",
-                          r"\bgoing to\b", r"\bheading to\b", r"\bheading out to\b", r"\bheading out\b", r"\bdrop me\b"],
+                          r"\broute\b", r"\bdrive\b", r"\bdriving\b",
+                          r"\bbus\b", r"\btrain\b", r"\btube\b", r"\bsubway\b", r"\bmetro\b",
+                          r"\bbike\b", r"\bcycling\b", r"\bwalk\b", r"\bwalking\b", r"\beta\b",
+                          r"\bgoing to\s+(?!rain|snow|be|hail|freeze)\b",
+                          r"\bheading to\b", r"\bheading out to\b", r"\bheading out\b", r"\bdrop me\b"],
             "breakfast": [
                 r"\bbreakfast\b", r"\blunch\b", r"\bdinner\b", r"\bsupper\b",
                 r"\bbrunch\b", r"\bsnack\b", r"\bmeal\b", r"\bmeals\b", r"\brecipe\b",
@@ -88,15 +91,72 @@ class QueryParser:
             "raw_query":       query,
         }
 
+    def _extract_excluded_sections(self, normalized: str) -> List[str]:
+        excluded = []
+        neg_patterns = [
+            r"\b(?:don't|do not|no|skip|without|exclude|omit|leave out|except|never mind)\s+(?:need\s+|want\s+|give\s+me\s+|include\s+)?(?:any\s+|the\s+)?([a-z\s]+?)(?=\s+(?:and|but|just|only|give|show|for|with|,)|$)",
+            r"\b(?:no|without)\s+([a-z]+)\b",
+            r"\b(?:already\s+ate|already\s+had)\b",
+        ]
+        if re.search(r"\b(?:already\s+ate|already\s+had)\b", normalized):
+            excluded.append("breakfast")
+
+        for pat in neg_patterns[:2]:
+            for m in re.finditer(pat, normalized):
+                chunk = m.group(1).strip()
+                for sec_name, patterns in self.section_keywords.items():
+                    if any(re.search(p, chunk) for p in patterns):
+                        excluded.append(sec_name)
+        return list(dict.fromkeys(excluded))
+
     def _extract_sections(self, normalized: str) -> List[str]:
         found = []
+        is_travel_query = bool(re.search(r"\b(?:vacation|itinerary|trip|getaway|holiday|tourist)\b", normalized))
+        excluded = self._extract_excluded_sections(normalized)
+
         for name, patterns in self.section_keywords.items():
-            if any(re.search(pat, normalized) for pat in patterns):
+            if name in excluded:
+                continue
+
+            # If it's a vacation/itinerary query and "food" is matched without cooking verbs, skip breakfast
+            if name == "breakfast" and is_travel_query:
+                if not re.search(r"\b(?:cook|cooking|recipe|breakfast|dinner|lunch|snack|dish|ingredients)\b", normalized):
+                    continue
+
+            # Match keywords only if not directly negated
+            matched = False
+            for pat in patterns:
+                for m in re.finditer(pat, normalized):
+                    start = m.start()
+                    preceding = normalized[max(0, start - 30):start]
+                    if re.search(r"\b(?:no|not|don't|do not|skip|without|exclude|omit|leave out)\s+(?:any\s+|the\s+)?$", preceding):
+                        continue
+                    matched = True
+                    break
+                if matched:
+                    break
+
+            if matched:
                 found.append(name)
 
-        if not found or any(w in normalized for w in ("briefing", "full", "everything", "all")):
-            if not found:
-                found = ["weather", "news", "commute", "breakfast"]
+        found = [s for s in found if s not in excluded]
+
+        # Out-of-scope intent guard
+        out_of_scope_prefixes = ("translate", "calculate", "convert", "solve", "write python", "write code", "who is", "who was", "stock price", "stock of", "market cap")
+        if any(normalized.startswith(p) for p in out_of_scope_prefixes):
+            return []
+
+        # Only trigger full default briefing if explicitly requested or when no sections found with morning/briefing greeting
+        if any(w in normalized for w in ("full briefing", "full report", "everything", "all sections", "start my day", "daily routine")):
+            fallback = ["weather", "news", "commute", "breakfast"]
+            for s in fallback:
+                if s not in excluded and s not in found:
+                    found.append(s)
+        elif not found and any(w in normalized for w in ("briefing", "morning", "good morning", "daily report")):
+            fallback = ["weather", "news", "commute", "breakfast"]
+            for s in fallback:
+                if s not in excluded and s not in found:
+                    found.append(s)
 
         return list(dict.fromkeys(found))
 
@@ -163,16 +223,17 @@ class QueryParser:
             "updates", "traffic", "transit", "travel", "route", "drive", "driving",
             "food", "recipe", "eat", "cook", "ingredients", "time", "day", "days", "the", "a", "an",
             "i", "me", "my", "our", "you", "your", "what", "is", "of", "in", "from", "at", "for", "s",
-            "trip", "vacation", "itinerary", "budget", "moderate", "luxury", "cheap"
+            "trip", "vacation", "itinerary", "budget", "moderate", "luxury", "cheap",
+            "morning", "evening", "afternoon", "night", "forecast", "report"
         }
 
-        # Pattern 0: "trip to <Location>" / "itinerary for <Location>" / "vacation in <Location>"
+        # Pattern 0: "trip to <Location>" / "itinerary for <Location>" / "vacation in/to <Location>"
         match = re.search(
-            r"\b(?:trip\s+to|itinerary\s+for|vacation\s+in|travel\s+to|visit)\s+([a-zA-Z\s,]+?)(?=\s+(?:for\s+\d+|in\s+a|with|on|at|today|tomorrow|this|please|and|,)|[\s.,!?]*$)",
+            r"\b(?:trip\s+to|itinerary\s+for|vacation\s+(?:in|to)|getaway\s+(?:vacation\s+)?to|travel\s+to|visit)\s+([a-zA-Z\s,]+?)(?=\s+(?:for\s+\d+|in\s+a|with|on|at|today|tomorrow|this|please|and|,)|[\s.,!?:;]*$)",
             query, re.IGNORECASE,
         )
         if match:
-            loc = match.group(1).strip(" .,!?")
+            loc = match.group(1).strip(" .,!?:;")
             words = [w for w in loc.split() if w.lower() not in _noise and not re.match(r"^\d+-days?$", w.lower())]
             if words:
                 return " ".join(words).title()
@@ -183,18 +244,18 @@ class QueryParser:
             query, re.IGNORECASE,
         )
         if match:
-            loc = match.group(1).strip(" .,!?")
+            loc = match.group(1).strip(" .,!?:;")
             words = [w for w in loc.split() if w.lower() not in _noise and not re.match(r"^\d+-days?$", w.lower())]
             if words:
                 return " ".join(words).title()
 
         # Pattern 2: "from/in/for/at/of <Location>"
         match = re.search(
-            r"\b(?:from|in|for|at|of)\s+([a-zA-Z\s]+?)(?=\s+(?:to|today|tomorrow|this|give|get|show|tell|please|and|with|how|,)|[\s.,!?]*$)",
+            r"\b(?:forecast\s+in|weather\s+in|from|in|for|at|of)\s+([a-zA-Z\s]+?)(?=\s+(?:to|today|tomorrow|this|give|get|show|tell|please|and|with|how|,)|[\s.,!?:;]*$)",
             query, re.IGNORECASE,
         )
         if match:
-            loc = match.group(1).strip(" .,!?")
+            loc = match.group(1).strip(" .,!?:;")
             words = [w for w in loc.split() if w.lower() not in _noise and not re.match(r"^\d+-days?$", w.lower())]
             if words:
                 return " ".join(words).title()
@@ -202,14 +263,14 @@ class QueryParser:
         # Fallback word scanner
         words = query.split()
         for i, w in enumerate(words):
-            clean = w.strip('.,!?').lower()
+            clean = w.strip('.,!?:;"\'-').lower()
             if (clean not in _noise and len(clean) > 2 and "'" not in clean
                     and not re.match(r"^\d+-days?$", clean)
                     and clean not in self.ingredient_keywords
                     and clean not in self.travel_words):
-                loc = w.strip('.,!?').title()
+                loc = w.strip('.,!?:;"\'-').title()
                 if i + 1 < len(words):
-                    next_w = words[i+1].strip('.,!?')
+                    next_w = words[i+1].strip('.,!?:;"\'-')
                     if (next_w.lower() not in _noise and len(next_w) > 2
                             and not re.match(r"^\d+-days?$", next_w.lower())
                             and "'" not in next_w and next_w.lower() not in self.ingredient_keywords):
@@ -263,7 +324,7 @@ class QueryParser:
         return found
 
     def _extract_time_constraint(self, normalized: str) -> str:
-        match = re.search(r"(\d+)\s*-?\s*minute", normalized)
+        match = re.search(r"(\d+)\s*-?\s*min(?:ute)?s?\b", normalized)
         if match:
             return f"{match.group(1)} minutes"
         return "no specific time"

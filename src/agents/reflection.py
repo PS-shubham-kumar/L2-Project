@@ -45,9 +45,11 @@ class ReflectionEngine:
         breakfast_data = self._extract_breakfast(sections)
 
         # ── Rule 1: Hot weather + outdoor commute ──────────────────────────
+        original_commute_mode = None
         if weather_data and commute_data:
             temp = weather_data.get("temp")
             mode = commute_data.get("recommended_mode", "drive")
+            original_commute_mode = mode
             if temp is not None and temp >= 35 and mode in ("bike", "walk"):
                 # Adjust: switch recommendation to drive
                 commute_section = sections.get("commute", {})
@@ -71,7 +73,7 @@ class ReflectionEngine:
         # ── Rule 2: Cold weather + walking ─────────────────────────────────
         if weather_data and commute_data:
             temp = weather_data.get("temp")
-            mode = commute_data.get("recommended_mode", "drive")
+            mode = original_commute_mode or commute_data.get("recommended_mode", "drive")
             if temp is not None and temp <= 2 and mode in ("walk", "bike"):
                 commute_section = sections.get("commute", {})
                 data = commute_section.get("data", {})
@@ -87,7 +89,7 @@ class ReflectionEngine:
         # ── Rule 3: High UV + outdoor commute ─────────────────────────────
         if weather_data and commute_data:
             uv = weather_data.get("uv_index")
-            mode = commute_data.get("recommended_mode", "drive")
+            mode = original_commute_mode or commute_data.get("recommended_mode", "drive")
             if uv is not None and isinstance(uv, (int, float)) and uv >= 8 and mode in ("bike", "walk"):
                 commute_section = sections.get("commute", {})
                 data = commute_section.get("data", {})

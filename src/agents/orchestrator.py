@@ -124,7 +124,16 @@ class OrchestratorAgent:
         routed_agents = self.router.route(sections)
         results: dict = {}
 
+        try:
+            from services.telemetry import telemetry
+            telemetry.agent(f"Orchestrator: structured run for query '{query}'", trace_id=session_id or "", agent_name="orchestrator")
+            telemetry.agent(f"Intent parsed: loc='{location}', dest='{destination}', sections={sections}", trace_id=session_id or "")
+        except Exception:
+            telemetry = None
+
         if "weather" in routed_agents:
+            if telemetry:
+                telemetry.agent("Dispatching WeatherAgent", trace_id=session_id or "", agent_name="weather_agent")
             try:
                 results["weather"] = self.weather_agent.run_structured(location)
             except Exception as exc:

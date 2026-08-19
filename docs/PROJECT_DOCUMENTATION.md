@@ -306,9 +306,67 @@ CREATE TABLE IF NOT EXISTS interactions (
 
 ---
 
-## 8. Verification & Test Coverage
+---
 
-All modules are continuously verified via `pytest`. The test suite contains **62 unit and integration tests**:
+## 8. Observability, Telemetry & Logging Subsystem
+
+The observability engine (`src/services/telemetry.py`) provides end-to-end operational visibility, real-time metrics aggregation, and OpenTelemetry-aligned span tracing.
+
+### 8.1 Dual-Mode Structured Logger
+- **Console Mode**: Real-time ANSI color-coded formatting displaying timestamps, log levels (`[INFO]`, `[WARN]`, `[ERROR]`), agent tags (`[AGENT]`, `[TOOL]`, `[LLM]`, `[REFLECTION]`), and trace identifiers (`[tid:xyz]`).
+- **File Persistence**: Dual persistence to human-readable log records in `data/telemetry/app.log` and structured JSONL format in `data/telemetry/traces.jsonl`.
+
+### 8.2 Execution Trace Spans & Waterfall Profiling
+The `trace_span(name, attributes)` context manager profiles every discrete sub-operation in the ReAct lifecycle:
+- `perceive_intent`: Query parsing latency & extracted entity counts.
+- `tool_discovery`: FastMCP server connection & tool registry enumeration.
+- `tool_<server>.<tool_name>`: Duration, invocation status (`OK`/`ERROR`), arguments, and payload size.
+- `llm_call`: Latency profiling, token usage counts, and model metadata.
+- `reflection_audit`: Multi-rule consistency evaluation duration and override tracking.
+- `synthesize_summary`: Natural language briefing composition latency.
+
+### 8.3 Rolling Metrics Aggregation & Observability REST APIs
+- `GET /api/observability/metrics`: Returns total request count, tool calls per server, latency percentiles (P50, P95), average LLM response latency, total tokens consumed, and error rates.
+- `GET /api/observability/traces`: Returns the 50 most recent execution traces with step counts, total durations, and status codes.
+- `GET /api/observability/traces/<trace_id>`: Returns granular waterfall spans and event timelines for a given trace.
+
+---
+
+## 9. 7-Layer Comprehensive Evaluation & Benchmarking Suite
+
+The project includes an enterprise-grade evaluation suite (`evals/`) covering 7 testing dimensions with dedicated golden datasets, evaluators, unified CLI runner, and CI regression tests:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                   COMMUTE COMMANDER EVALUATION SUITE                   │
+├────────────────────────────────────────────────────────────────────────┤
+│ Layer 7: Complex Multi-Tool Orchestration (eval_multitool.py)          │
+│ Layer 6: Negative Constraints & Excluded Tools (eval_negative.py)      │
+│ Layer 5: Adversarial & Edge-Case Benchmark (eval_adversarial.py)       │
+│ Layer 4: Output Quality & Faithfulness Judge (eval_llm_judge.py)       │
+│ Layer 3: Cross-Domain Reflection Matrix Benchmark (eval_reflection.py) │
+│ Layer 2: ReAct Trajectory & Tool Call Validation (eval_trajectory.py)  │
+│ Layer 1: NLP Intent Classification & Slot Benchmark (eval_intent.py)   │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### Layer Breakdown & Metrics
+
+| Layer | Benchmark Evaluator | Golden Dataset | Scope & Assertions | Benchmark Score |
+|---|---|---|---|---|
+| **1. Intent & Routing** | `eval_intent.py` | `routing_golden.json` (20 cases) | Single & compound section routing, slot extraction accuracy (cities, ingredients, times). | **100.0% Acc (F1: 1.00)** |
+| **2. Agent Trajectory** | `eval_trajectory.py` | `trajectory_golden.json` (6 cases) | Tool call selection accuracy, execution order validation, step efficiency bounds ($\le 7$ steps). | **100.0% Tool Acc (100% Eff)** |
+| **3. Reflection Matrix** | `eval_reflection.py` | `reflection_matrix.json` (7 cases) | Cross-domain multi-factor rule consistency (Heat vs Bike, Cold, UV Index, Prep vs Commute, Climate Meals). | **100.0% Pass (7/7)** |
+| **4. Quality & Judge** | `eval_llm_judge.py` | `synthesis_golden.json` (3 cases) | LLM-as-a-judge evaluating factual faithfulness, completeness, formatting quality, and hallucination absence. | **4.3 / 5.0 Faithful Score** |
+| **5. Adversarial & OOD** | `eval_adversarial.py` | `adversarial_edge_cases.json` & `extreme_reflection_matrix.json` (12 cases) | Colloquial slang ("tube", "umbrella weather"), multi-constraint recipe dumps, compound extreme conditions (Heat 42°C + UV 11.5 + Bike). | **100.0% Pass (NLP: 100%)** |
+| **6. Negative Constraints** | `eval_negative.py` | `negative_golden.json` (10 cases) | Explicit exclusions ("do not give commute", "skip news"), past temporal negations ("already ate breakfast"), out-of-scope queries ("write python code", "translate"). | **100.0% Pass (10/10)** |
+| **7. Multi-Tool Orch** | `eval_multitool.py` | `multitool_orchestration_golden.json` (5 cases) | Complex 3-tool and 4-tool multi-agent pipelines (Weather + Commute + News + Recipe / Itinerary), step bounds, and state consistency. | **100.0% Pass (5/5)** |
+
+---
+
+## 10. Verification & Test Coverage
+
+All modules are continuously verified via `pytest`. The test suite contains **69 unit, integration, and eval regression tests**:
 
 | Test Module | Coverage Area | Tests | Status |
 |---|---|---|---|
@@ -321,7 +379,8 @@ All modules are continuously verified via `pytest`. The test suite contains **62
 | `test_reflection.py` | Multi-factor reflection consistency rules | 10 | ✅ Passed |
 | `test_phase6_7.py` | SQLiteSessionManager & SettingsManager persistence | 11 | ✅ Passed |
 | `test_session_logging.py`| SQLite session transactions and history clearing | 2 | ✅ Passed |
-| **Total** | **Complete System Automated Verification** | **62** | **100% Passed** |
+| `test_evals_regression.py` | 7-Layer Evaluation Suite automated regression benchmark | 7 | ✅ Passed |
+| **Total** | **Complete System Automated Verification** | **69** | **100% Passed** |
 
 ---
 

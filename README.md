@@ -4,7 +4,8 @@
 
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.14-blue.svg)](https://www.python.org/)
 [![Architecture](https://img.shields.io/badge/Architecture-ReAct%20Multi--Agent%20%2B%20FastMCP-purple.svg)](docs/ARCHITECTURE_WORKFLOW.md)
-[![Tests](https://img.shields.io/badge/Tests-62%20Passed%20%28100%25%29-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-69%20Passed%20%28100%25%29-brightgreen.svg)](tests/)
+[![Evals](https://img.shields.io/badge/Evals-7%20Layers%20Passed-blueviolet.svg)](evals/)
 [![Protocol](https://img.shields.io/badge/MCP-FastMCP%20Standard-orange.svg)](src/mcp_tools/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
@@ -155,7 +156,27 @@ L2-Project/
 │       ├── db.py                # SQLite database interface (WAL mode)
 │       ├── llm_client.py        # Multi-provider LLM API interface (NVIDIA NIM / Groq / OpenAI)
 │       ├── session_manager.py   # Session & interaction persistence
-│       └── settings_manager.py  # User settings & preferences manager
+│       ├── settings_manager.py  # User settings & preferences manager
+│       └── telemetry.py         # Dual-mode logger, trace spans & rolling metrics
+├── evals/                       # 7-Layer Comprehensive Evaluation Suite
+│   ├── datasets/                # Golden benchmark datasets (JSON)
+│   │   ├── routing_golden.json  # Layer 1: NLP intent & slot benchmarks (20 cases)
+│   │   ├── trajectory_golden.json # Layer 2: ReAct tool selection trajectories (6 cases)
+│   │   ├── reflection_matrix.json # Layer 3: Consistency rule matrices (7 cases)
+│   │   ├── synthesis_golden.json  # Layer 4: Quality & faithfulness test set (3 cases)
+│   │   ├── adversarial_edge_cases.json # Layer 5: Colloquial & OOD cases (12 cases)
+│   │   ├── negative_golden.json # Layer 6: Exclusions & temporal negations (10 cases)
+│   │   └── multitool_orchestration_golden.json # Layer 7: Complex 3/4-tool combos (5 cases)
+│   ├── evaluators/              # Automated evaluators for all 7 layers
+│   │   ├── eval_intent.py       # Layer 1: Intent & slot extraction evaluator
+│   │   ├── eval_trajectory.py   # Layer 2: ReAct tool sequence & efficiency evaluator
+│   │   ├── eval_reflection.py   # Layer 3: Consistency rule auditor
+│   │   ├── eval_llm_judge.py    # Layer 4: LLM-as-a-judge quality evaluator
+│   │   ├── eval_adversarial.py  # Layer 5: Adversarial & OOD evaluator
+│   │   ├── eval_negative.py     # Layer 6: Negative constraints & exclusion evaluator
+│   │   └── eval_multitool.py    # Layer 7: Complex multi-tool pipeline evaluator
+│   ├── runner.py                # Unified CLI evaluation runner & scorecard generator
+│   └── results/                 # Timestamped evaluation reports (JSON)
 ├── frontend/                    # Static Web Application
 │   ├── index.html               # Semantic HTML5 dashboard layout
 │   ├── styles.css               # Token-based glassmorphism styling
@@ -164,9 +185,10 @@ L2-Project/
 │   ├── webapp.py                # Native Python HTTP server (Port 8000)
 │   ├── main.py                  # Terminal interactive CLI application
 │   └── run_demo.py              # Automated CLI demonstration runner
-├── tests/                       # 62 Automated Unit & Integration Tests
+├── tests/                       # 69 Automated Unit, Integration & Eval Regression Tests
 │   ├── test_agentic_loop.py     # ReAct loop, discovery, and trace tests
 │   ├── test_email_tools.py      # FastMCP email dispatch tests
+│   ├── test_evals_regression.py # Automated CI regression suite for all 7 eval layers
 │   ├── test_itinerary.py        # Itinerary generation & routing tests
 │   ├── test_llm_client.py       # LLM client & provider tests
 │   ├── test_meal_agent.py       # Dynamic meals, pantry, and meal_type tests
@@ -174,8 +196,9 @@ L2-Project/
 │   ├── test_query_parser.py     # NLP entity & intent extraction tests
 │   ├── test_reflection.py       # Multi-factor reflection rule tests
 │   └── test_session_logging.py  # SQLite session logging tests
-├── data/                        # Persistent SQLite database storage (gitignored)
-│   └── sessions.db              # Thread-safe SQLite WAL database
+├── data/                        # Persistent SQLite database & telemetry logs
+│   ├── sessions.db              # Thread-safe SQLite WAL database
+│   └── telemetry/               # app.log & structured traces.jsonl
 ├── config/
 │   └── settings.json            # Application configuration & defaults
 ├── docs/                        # Comprehensive Architecture & API Documentation
@@ -253,19 +276,94 @@ python scripts/main.py
 python scripts/run_demo.py
 ```
 
-### Running the Automated Test Suite
+### Running the Automated Test & Eval Suite
 ```bash
+# Run complete test suite (Unit + Integration + 7-Layer Evals Regression)
 pytest -v
+
+# Run only the 7-Layer Evals CI Regression Suite
+pytest tests/test_evals_regression.py -v
 ```
-Executes all **62 unit and integration tests** across the agentic loop, NLP query parser, FastMCP servers, and database persistence.
+Executes all **69 automated tests** with 100% pass rate.
+
+### Running the 7-Layer Evaluation Runner CLI
+```bash
+# Run all 7 benchmark layers and generate a scorecard
+python -m evals.runner
+
+# Run specific evaluation layers
+python -m evals.runner --category negative
+python -m evals.runner --category multitool
+python -m evals.runner --category adversarial
+python -m evals.runner --category intent
+python -m evals.runner --category trajectory
+python -m evals.runner --category reflection
+python -m evals.runner --category judge
+```
 
 ---
 
-## 9. Example Natural-Language Queries
+## 9. Observability & Telemetry
+
+The application embeds zero-overhead, production-grade observability via `src/services/telemetry.py`:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       OBSERVABILITY & TELEMETRY ENGINE                      │
+├─────────────────────────┬─────────────────────────┬─────────────────────────┤
+│    DUAL-MODE LOGGING    │    WATERFALL SPANS      │   REAL-TIME METRICS API │
+│  • ANSI Console Colors  │  • ReAct Step Profiling │  • GET /api/observability│
+│  • data/telemetry/app.log│  • Tool Latency Timing  │    /metrics             │
+│  • traces.jsonl Records │  • Token Usage & Costs  │  • GET /traces          │
+└─────────────────────────┴─────────────────────────┴─────────────────────────┘
+```
+
+- **Dual-Mode Logger**: Real-time ANSI colored terminal output for developers (`[AGENT]`, `[TOOL]`, `[LLM]`, `[REFLECTION]`) and persistent structured files (`data/telemetry/app.log`, `data/telemetry/traces.jsonl`).
+- **OpenTelemetry-Compatible Spans**: `trace_span()` context manager tracks durations, argument payloads, status codes, and errors across every perception, tool invocation, and LLM call.
+- **REST Telemetry APIs**:
+  - `GET /api/observability/metrics` — Latency percentiles (P50, P95), tool counts per server, token consumption, error rates.
+  - `GET /api/observability/traces` — Chronological execution traces.
+  - `GET /api/observability/traces/<trace_id>` — Deep waterfall span timeline.
+
+---
+
+## 10. 7-Layer Comprehensive Evaluation Suite
+
+Commute Commander incorporates an evaluation suite (`evals/`) testing agent intelligence across 7 layers:
+
+```
+────────────────────────────────────────────────────────────────────────
+ EVALUATION CATEGORY          | TESTS  | SCORE / METRIC     | STATUS    
+────────────────────────────────────────────────────────────────────────
+ 1. Intent & Routing          | 20     | Acc: 100.0% (F1:1.00) | [ PASSED ]
+ 2. Agent Trajectory          | 6      | Tool: 100.0% (Eff:100%) | [ PASSED ]
+ 3. Reflection Rules          | 7      | Pass: 100.0% (7/7) | [ PASSED ]
+ 4. Output Quality Judge      | 3      | Faithful: 4.3/5.0  | [ PASSED ]
+ 5. Adversarial & OOD         | 12     | Acc: 100.0% (NLP:100%) | [ PASSED ]
+ 6. Negative Constraints      | 10     | Pass: 100.0% (10/10) | [ PASSED ]
+ 7. Multi-Tool Orch           | 5      | Pass: 100.0% (5/5) | [ PASSED ]
+────────────────────────────────────────────────────────────────────────
+ Result: ALL EVALS PASSED (Completed in 103.75s)
+```
+
+1. **Intent & Routing** (`eval_intent.py`): 20 golden cases testing single & multi-intent routing and slot extraction accuracy.
+2. **Agent Trajectory** (`eval_trajectory.py`): Validates ReAct tool selection order and step efficiency bounds ($\le 7$ steps).
+3. **Reflection Matrix** (`eval_reflection.py`): Tests 5 cross-domain safety and consistency rules.
+4. **LLM Faithfulness Judge** (`eval_llm_judge.py`): Automated LLM-as-a-judge scoring factual faithfulness and completeness.
+5. **Adversarial & OOD Cases** (`eval_adversarial.py`): Slang transit, weather metaphors, multi-constraint recipe dumps, and triple-conflict edge cases.
+6. **Negative Constraints** (`eval_negative.py`): Explicit exclusions (*"skip news"*, *"no commute"*), past temporal negations (*"already ate breakfast"*), and out-of-scope queries (*"write python code"*, *"translate"*).
+7. **Complex Multi-Tool Orchestration** (`eval_multitool.py`): 3-tool and 4-tool multi-agent pipelines with order validation and execution efficiency.
+
+---
+
+## 11. Example Natural-Language Queries
 
 | Goal | Sample Query |
 |---|---|
 | **Multi-Domain Morning Briefing** | *"I'm leaving from Chicago to Downtown. Give me today's weather, top news, commute advice, and a 10-minute breakfast with eggs."* |
+| **Negative Constraints (Excluded Tools)** | *"Give me weather and news for Miami, but do not give me any commute or breakfast recipes."* |
+| **Past Temporal Negation** | *"I already ate breakfast. Just check traffic from Evanston to Chicago Loop and top headlines."* |
+| **4-Tool Multi-Agent Briefing** | *"Chicago morning briefing: weather in Chicago, traffic from Evanston to Loop, top news headlines, and 10-minute breakfast with eggs."* |
 | **Lunch Planning with Ingredients** | *"Quick healthy lunch with chicken and spinach under 15 minutes."* |
 | **Dinner Planning with Custom Ingredients** | *"Dinner idea with paneer, tomatoes and garlic in 20 min."* |
 | **Multi-Day Travel Itinerary** | *"Plan a 3-day travel itinerary for Tokyo focusing on sightseeing, local food, and cultural heritage."* |
@@ -273,6 +371,7 @@ Executes all **62 unit and integration tests** across the agentic loop, NLP quer
 
 ---
 
-## 10. License
+## 12. License
 
 This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for full details.
+

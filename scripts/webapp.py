@@ -25,6 +25,7 @@ import queue
 import re
 import sys
 import threading
+import time
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -38,6 +39,7 @@ sys.path.insert(0, str(SRC_DIR))
 from agents.orchestrator import OrchestratorAgent
 from services.db import SQLiteSessionManager
 from services.settings_manager import SettingsManager
+from services.telemetry import telemetry
 
 
 ROOT             = PROJECT_ROOT
@@ -64,6 +66,8 @@ _RE_SETTINGS        = re.compile(r"^/api/settings$")
 _RE_COMMUTE         = re.compile(r"^/api/commute$")
 _RE_ITINERARY       = re.compile(r"^/api/itinerary$")
 _RE_SHARE_EMAIL     = re.compile(r"^/api/share/email$")
+_RE_OBS_METRICS     = re.compile(r"^/api/observability/metrics$")
+_RE_OBS_TRACES      = re.compile(r"^/api/observability/traces$")
 
 
 
@@ -78,6 +82,27 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIRECTORY), **kwargs)
 
+    def handle_one_request(self) -> None:
+        self._req_t0 = time.perf_counter()
+        super().handle_one_request()
+
+    def log_request(self, code='-', size='-') -> None:
+        try:
+            status_int = int(code) if str(code).isdigit() else 200
+        except Exception:
+            status_int = 200
+        duration_ms = (time.perf_counter() - getattr(self, "_req_t0", time.perf_counter())) * 1000
+        telemetry.http(
+            method=self.command,
+            path=self.path,
+            status=status_int,
+            duration_ms=duration_ms,
+            ip=self.client_address[0] if self.client_address else "127.0.0.1",
+        )
+
+    def log_error(self, fmt: str, *args) -> None:
+        telemetry.error("HTTP", fmt % args)
+
     # ── GET ─────────────────────────────────────────────────────────────────
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
@@ -88,6 +113,14 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
 
         if _RE_SETTINGS.match(path):
             self._handle_settings_get()
+            return
+
+        if _RE_OBS_METRICS.match(path):
+            self._handle_observability_metrics()
+            return
+
+        if _RE_OBS_TRACES.match(path):
+            self._handle_observability_traces()
             return
 
         m = _RE_HISTORY_DETAIL.match(path)
@@ -542,6 +575,14 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
         except Exception as exc:
             self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
 
+    def _handle_observability_metrics(self) -> None:
+        """GET /api/observability/metrics"""
+        self._send_json(HTTPStatus.OK, telemetry.metrics.snapshot())
+
+    def _handle_observability_traces(self) -> None:
+        """GET /api/observability/traces"""
+        self._send_json(HTTPStatus.OK, {"traces": list(telemetry.recent_traces)})
+
     # ── Helpers ──────────────────────────────────────────────────────────────
 
     def _read_json_body(self) -> dict:
@@ -557,16 +598,27 @@ class CommuteCommanderHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
-    def log_message(self, fmt: str, *args) -> None:  # suppress per-request noise
-        pass
-
 
 if __name__ == "__main__":
+    from services.config import Config
     server = ThreadingHTTPServer(("127.0.0.1", 8000), CommuteCommanderHandler)
-    print("Commute Commander -> http://localhost:8000")
+    model = Config.get_llm_model() or "llama-3.1-8b-instruct"
+    
+    print("\n" + "\033[1m\033[36m" + "═" * 65 + "\033[0m")
+    print(" \033[1m\033[32m🚀 COMMUTE COMMANDER — Multi-Agent Assistant Server\033[0m")
+    print("\033[1m\033[36m" + "═" * 65 + "\033[0m")
+    print(" • \033[1mWeb UI URL\033[0m         : \033[34mhttp://localhost:8000\033[0m")
+    print(" • \033[1mObservability API\033[0m  : \033[34mhttp://localhost:8000/api/observability/metrics\033[0m")
+    print(" • \033[1mRecent Traces API\033[0m  : \033[34mhttp://localhost:8000/api/observability/traces\033[0m")
+    print(" • \033[1mTelemetry Logs\033[0m     : \033[33mdata/telemetry/app.log\033[0m & \033[33mtraces.jsonl\033[0m")
+    print(f" • \033[1mActive Model\033[0m       : \033[35m{model}\033[0m")
+    print("\033[1m\033[36m" + "═" * 65 + "\033[0m")
+    print(" \033[90m[INFO] Telemetry active. Ready & listening for requests...\033[0m\n", flush=True)
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nServer stopped.")
+        print("\n\033[33mServer stopped.\033[0m")
     finally:
         server.server_close()
+

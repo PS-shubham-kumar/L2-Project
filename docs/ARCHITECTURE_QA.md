@@ -94,3 +94,28 @@ The `ReflectionEngine` acts as an automated safety and consistency auditor:
 - **Simplicity**: SSE operates over standard HTTP/1.1 without requiring complex WebSocket handshake protocols.
 - **Unidirectional Fit**: Daily briefings require unidirectional streaming from server to client as agents complete in parallel threads.
 - **Native Browser Reconnection**: Browsers natively manage `EventSource` connections with automatic reconnection and event parsing.
+
+---
+
+## 5. Observability, Telemetry & Evaluation
+
+### Q9: How does the Observability and Telemetry engine work without heavy APM dependencies?
+**Answer**:
+`src/services/telemetry.py` provides zero-dependency, OpenTelemetry-aligned telemetry:
+1. **Dual-Mode Structured Logger**: Real-time ANSI color-coded formatting in the terminal console alongside persistent file records in `data/telemetry/app.log` and structured JSONL in `data/telemetry/traces.jsonl`.
+2. **Context-Managed Span Tracing**: The `trace_span()` context manager wraps every perception, tool invocation, LLM call, and reflection audit, capturing latency, arguments, and execution statuses.
+3. **Rolling In-Memory Aggregator**: Calculates tool-level latency percentiles (P50, P95), request throughput, error counts, and token metrics accessible via `/api/observability/metrics` and `/api/observability/traces`.
+
+---
+
+### Q10: Why implement a 7-layer evaluation suite instead of standard unit tests alone?
+**Answer**:
+Standard unit tests only verify function input/output correctness. Complex agentic systems require multi-dimensional evaluation:
+1. **Layer 1 (Intent & Routing)**: Ensures zero hallucination in NLP intent extraction and slot parsing.
+2. **Layer 2 (ReAct Trajectory)**: Validates tool selection accuracy, execution ordering, and step efficiency bounds.
+3. **Layer 3 (Reflection Matrix)**: Proves cross-domain safety and consistency rules trigger reliably.
+4. **Layer 4 (LLM Judge)**: Uses LLM-as-a-judge to score factual faithfulness and synthesize quality against ground-truth data.
+5. **Layer 5 (Adversarial & OOD)**: Tests robustness against slang, distractor words, and triple-conflict conditions.
+6. **Layer 6 (Negative Constraints)**: Verifies explicit exclusions ("skip news", "no commute"), past temporal negations ("already ate"), and out-of-scope guards.
+7. **Layer 7 (Multi-Tool Orchestration)**: Verifies multi-agent pipelines (3-tool and 4-tool combinations) run within step bounds with 100% state consistency.
+

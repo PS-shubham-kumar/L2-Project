@@ -175,3 +175,93 @@ sequenceDiagram
 | **NewsAPI Endpoint Failure** | Multi-feed RSS parser executes fallback chain across BBC, NDTV, and NYT feeds. | Live headlines with publisher attribution and clickable URLs are delivered seamlessly. |
 | **Gmail Credentials Missing in `.env`** | Gmail FastMCP tool returns simulated delivery status with detailed confirmation. | System does not crash; UI informs user that credentials need to be set in `.env`. |
 | **Individual Agent Timeout** | 45-second per-agent timeout isolates failure to that section's card error envelope. | Other cards render normally; overall briefing succeeds. |
+
+---
+
+## 6. Observability & Telemetry Tracing Workflow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User Request
+    participant WebApp as scripts/webapp.py
+    participant Loop as AgenticLoop
+    participant Telemetry as TelemetryEngine (telemetry.py)
+    participant Console as Color Console Output
+    participant Files as data/telemetry/ (app.log & traces.jsonl)
+    participant Metrics as Rolling Metrics Store
+
+    User->>WebApp: POST /api/briefing (query)
+    WebApp->>Telemetry: trace_span("http_request", {query})
+    WebApp->>Console: [INFO] [HTTP] --> POST /api/briefing (query)
+    
+    WebApp->>Loop: run(query)
+    Loop->>Telemetry: trace_span("agentic_loop", {session_id})
+    
+    Loop->>Telemetry: trace_span("perceive_intent")
+    Loop->>Console: [INFO] [AGENT] [tid:xxx] PERCEIVE: parsing query
+    
+    loop Per Tool Execution
+        Loop->>Telemetry: trace_span("tool_<server>.<tool_name>")
+        Loop->>Console: [INFO] [TOOL] [tid:xxx] Invoke <server>.<tool> -> OK (latency_ms)
+        Telemetry->>Metrics: record_tool_call(server, tool, latency_ms, status)
+    end
+
+    Loop->>Telemetry: trace_span("reflection_audit")
+    Loop->>Console: [INFO] [REFLECTION] [tid:xxx] Reflection confirmed all answers
+    
+    Loop->>Telemetry: trace_span("synthesize_summary")
+    Loop->>Console: [INFO] [LLM] nim/meta/llama-3.1-8b-instruct (latency_ms, tokens)
+    Telemetry->>Metrics: record_llm_call(model, latency_ms, tokens)
+
+    Loop-->>WebApp: AgenticResult
+    WebApp->>Console: [INFO] [HTTP] <-- 200 OK (duration_ms, status=OK)
+    Telemetry->>Files: Append structured trace record to traces.jsonl & app.log
+```
+
+---
+
+## 7. 7-Layer Evaluation & Benchmarking Execution Pipeline
+
+```mermaid
+graph TD
+    Runner[CLI Runner: python -m evals.runner --category all / Pytest] --> L1 & L2 & L3 & L4 & L5 & L6 & L7
+
+    subgraph "Layer 1: NLP Intent & Routing"
+        L1[eval_intent.py] --> D1[(routing_golden.json - 20 cases)]
+        D1 --> E1["Evaluates exact intent matches, F1 scores, & slot precision"]
+    end
+
+    subgraph "Layer 2: ReAct Trajectory"
+        L2[eval_trajectory.py] --> D2[(trajectory_golden.json - 6 cases)]
+        D2 --> E2["Validates tool call sequence, arguments, & step efficiency"]
+    end
+
+    subgraph "Layer 3: Reflection Consistency"
+        L3[eval_reflection.py] --> D3[(reflection_matrix.json - 7 cases)]
+        D3 --> E3["Audits 5 cross-domain consistency & safety rules"]
+    end
+
+    subgraph "Layer 4: LLM Judge"
+        L4[eval_llm_judge.py] --> D4[(synthesis_golden.json - 3 cases)]
+        D4 --> E4["LLM-as-a-judge scores factual faithfulness & completeness"]
+    end
+
+    subgraph "Layer 5: Adversarial & OOD"
+        L5[eval_adversarial.py] --> D5[(adversarial_edge_cases.json - 12 cases)]
+        D5 --> E5["Tests colloquial slang, multi-constraints, & triple conflicts"]
+    end
+
+    subgraph "Layer 6: Negative Constraints"
+        L6[eval_negative.py] --> D6[(negative_golden.json - 10 cases)]
+        D6 --> E6["Validates explicit exclusions, past meal negations, & out-of-scope guards"]
+    end
+
+    subgraph "Layer 7: Multi-Tool Orchestration"
+        L7[eval_multitool.py] --> D7[(multitool_orchestration_golden.json - 5 cases)]
+        D7 --> E7["Tests complex 3-tool and 4-tool multi-agent pipelines"]
+    end
+
+    E1 & E2 & E3 & E4 & E5 & E6 & E7 --> Scorecard["Scorecard Summary & JSON Report (evals/results/report_*.json)"]
+```
+
